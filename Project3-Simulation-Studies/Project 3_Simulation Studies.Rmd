@@ -1,0 +1,1333 @@
+---
+title: "Untitled"
+output: pdf_document
+date: "2023-12-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+### libraries
+library(riskCommunicator)
+library(tidyverse)
+library(tableone)
+library(corrplot)
+library(MASS)
+library(Matrix)
+```
+
+
+```{r}
+### Model ###
+
+data("framingham")
+
+# The Framingham data has been used to create models for cardiovascular risk.
+# The variable dplyr::selection and model below are designed to mimic the models used
+# in the paper General Cardiovascular Risk Profile for Use in Primary Care 
+# This paper is available (cvd_risk_profile.pdf) on Canvas.
+
+framingham_df <- framingham %>% dplyr::select(c(CVD, TIMECVD, SEX, TOTCHOL, AGE,
+                                      SYSBP, DIABP, CURSMOKE, DIABETES, BPMEDS,
+                                      HDLC, BMI))
+framingham_df <- na.omit(framingham_df)
+
+CreateTableOne(data=framingham_df, strata = c("SEX"))
+
+# Get blood pressure based on whether or not on BPMEDS
+framingham_df$SYSBP_UT <- ifelse(framingham_df$BPMEDS == 0, 
+                                 framingham_df$SYSBP, 0)
+framingham_df$SYSBP_T <- ifelse(framingham_df$BPMEDS == 1, 
+                                framingham_df$SYSBP, 0)
+
+# Looking at risk within 15 years - remove censored data
+dim(framingham_df)
+framingham_df <- framingham_df %>%
+  filter(!(CVD == 0 & TIMECVD <= 365*15)) %>%
+  dplyr::select(-c(TIMECVD))
+dim(framingham_df)
+
+# Filter to each sex
+framingham_df_men <- framingham_df %>% filter(SEX == 1)
+framingham_df_women <- framingham_df %>% filter(SEX == 2)
+
+# Create a summary table 
+summary_table_1 <-  framingham_df %>%
+tbl_summary(by = SEX) %>%
+  add_p()
+
+#summary_table_1
+
+# Fit models with log transforms for all continuous variables
+mod_men <- glm(CVD~log(HDLC)+log(TOTCHOL)+log(AGE)+log(SYSBP_UT+1)+
+                 log(SYSBP_T+1)+CURSMOKE+DIABETES, 
+      data= framingham_df_men, family= "binomial")
+
+
+mod_women <- glm(CVD~log(HDLC)+log(TOTCHOL)+log(AGE)+log(SYSBP_UT+1)+
+                   log(SYSBP_T+1)+CURSMOKE+DIABETES, 
+               data= framingham_df_women, family= "binomial")
+
+```
+
+
+```{r}
+# The NHANES data here finds the same covariates among this national survey data
+library(nhanesA)
+
+# blood pressure, demographic, bmi, smoking, and hypertension info
+bpx_2017 <- nhanes("BPX_J") %>% 
+  dplyr::select(SEQN, BPXSY1 ) %>% 
+  rename(SYSBP = BPXSY1)
+demo_2017 <- nhanes("DEMO_J") %>% 
+  dplyr::select(SEQN, RIAGENDR, RIDAGEYR) %>% 
+  rename(SEX = RIAGENDR, AGE = RIDAGEYR)
+bmx_2017 <- nhanes("BMX_J") %>% 
+  dplyr::select(SEQN, BMXBMI) %>% 
+  rename(BMI = BMXBMI)
+smq_2017 <- nhanes("SMQ_J") %>%
+  mutate(CURSMOKE = case_when(SMQ040 %in% c(1,2) ~ 1,
+                              SMQ040 == 3 ~ 0, 
+                              SMQ020 == 2 ~ 0)) %>%
+  dplyr::select(SEQN, CURSMOKE)
+bpq_2017 <- nhanes("BPQ_J") %>% 
+  mutate(BPMEDS = case_when(
+    BPQ020 == 2 ~ 0,
+    BPQ040A == 2 ~ 0,
+    BPQ050A == 1 ~ 1,
+    TRUE ~ NA )) %>%
+  dplyr::select(SEQN, BPMEDS) 
+tchol_2017 <- nhanes("TCHOL_J") %>% 
+  dplyr::select(SEQN, LBXTC) %>% 
+  rename(TOTCHOL = LBXTC)
+hdl_2017 <- nhanes("HDL_J") %>% 
+  dplyr::select(SEQN, LBDHDD) %>% 
+  rename(HDLC = LBDHDD)
+diq_2017 <- nhanes("DIQ_J") %>% 
+  mutate(DIABETES = case_when(DIQ010 == 1 ~ 1, 
+                              DIQ010 %in% c(2,3) ~ 0, 
+                              TRUE ~ NA)) %>%
+  dplyr::select(SEQN, DIABETES) 
+
+# Join data from different tables
+df_2017 <- bpx_2017 %>%
+  full_join(demo_2017, by = "SEQN") %>%
+  full_join(bmx_2017, by = "SEQN") %>%
+  full_join(hdl_2017, by = "SEQN") %>%
+  full_join(smq_2017, by = "SEQN") %>%
+  full_join(bpq_2017, by = "SEQN") %>%
+  full_join(tchol_2017, by = "SEQN") %>%
+  full_join(diq_2017, by = "SEQN")
+
+CreateTableOne(data = df_2017, strata = c("SEX"))
+
+df_2017 <- na.omit(df_2017)
+
+
+# Get blood pressure for nhanes based on whether or not on BPMEDS
+df_2017$SYSBP_UT <- ifelse(df_2017$BPMEDS == 0, 
+                                 df_2017$SYSBP, 0)
+df_2017$SYSBP_T <- ifelse(df_2017$BPMEDS == 1, 
+                                df_2017$SYSBP, 0)
+
+#df_2017
+
+# Create a summary table 
+summary_table_2 <-  df_2017 %>%
+dplyr::select(-SEQN) %>%
+  tbl_summary(by = SEX) %>%
+  add_p()
+
+#summary_table_2
+
+
+###### Filter NHANES data based on eligibility criteria #####
+
+df_2017_upd <- df_2017 %>%
+  filter(AGE >= 45 & AGE <= 81)
+
+
+# Filter to each sex
+nhanes_men <- df_2017_upd %>% filter(SEX == 1)
+nhanes_women <- df_2017_upd %>% filter(SEX == 2)
+```
+
+
+```{r}
+### Create S population indicator 
+framingham_df <- framingham_df %>% mutate(S = 1)
+df_2017 <- df_2017 %>% mutate(S = 0)
+```
+
+
+```{r}
+##### check common variables
+common_vars <- intersect(names(framingham_df), names(df_2017))
+
+#common_vars
+
+### Calculate age distribution percentages for Framingham data
+framingham_age_percent <- framingham_df %>%
+  group_by(AGE) %>%
+  summarize(Percentage = n() / nrow(framingham_df) * 100)
+
+### Calculate age distribution percentages for NHANES data
+nhanes_age_percent <- df_2017 %>%
+  group_by(AGE) %>%
+  summarize(Percentage = n() / nrow(df_2017) * 100)
+
+
+#print(framingham_age_percent)
+
+#print(nhanes_age_percent)
+```
+
+
+```{r}
+### Calculate age distribution percentages for filtered NHANES data
+nhanes_age_percent_upd <- df_2017_upd %>%
+      group_by(AGE) %>%
+      summarize(Percentage = n() / nrow(df_2017) * 100)
+
+#print(nhanes_age_percent_upd)
+
+### Plots for the age distribution 
+ggplot(nhanes_age_percent_upd, aes(x = AGE, y = Percentage)) +
+  geom_bar(stat = "identity", fill = "gray", color = "black") +
+  labs(title = "Age Distribution in NHANES Data (Age > 43) - Percentage",
+       x = "Age",
+       y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1))
+
+
+ggplot(framingham_age_percent, aes(x = AGE, y = Percentage)) +
+  geom_bar(stat = "identity", fill = "gray", color = "black") +
+  labs(title = "Age Distribution in NHANES Data (Age > 43) - Percentage",
+       x = "Age",
+       y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1))
+```
+
+
+```{r}
+##### Drop the DIAB variable from framingham_df
+framingham_df_upd <- framingham_df %>%
+  dplyr::select(-DIABP)
+```
+
+
+```{r}
+##### Combine dataframes (select common variables and the outcome (CVD) from Framingham and SEQN from NHANES)
+
+### Add a new column 'CVD' to df_2017_upd and set it to NA
+df_2017_upd$CVD <- NA
+
+### Add a new column 'SEQN' to df_2017 and set it to NA
+framingham_df_upd$SEQN <- NA
+
+# Add a new column 'S' to df_2017_upd and set it to NA
+df_2017_upd$S <- NA
+
+# Reorder the columns in df_2017_upd to match the order in framingham_df_upd
+df_2017_upd <- df_2017_upd[, colnames(framingham_df_upd)]
+
+### Combine two datasets
+df_comb <- rbind(framingham_df_upd, df_2017_upd)
+
+### Filter combined df to each sex
+df_comb_men <- df_comb %>% filter(SEX == 1)
+df_comb_women <- df_comb %>% filter(SEX == 2)
+```
+
+
+```{r}
+##### Estimate inverse-odds #####
+
+### Fit a model to estimate Pr[S=1|X] for df_comb_men
+inv_odds_model_men <- glm(S ~ log(HDLC)+log(TOTCHOL)+log(AGE)+log(SYSBP_UT+1)+
+                 log(SYSBP_T+1)+CURSMOKE+DIABETES, data = df_comb_men, family = binomial())
+
+prob_men <- predict(inv_odds_model_men, df_comb_men, type = "response")
+
+inv_prob_men <- (prob_men/(1-prob_men))^(-1)
+
+
+
+### Fit a model to estimate Pr[S=1|X] for df_comb_women
+inv_odds_model_women <- glm(S ~ log(HDLC)+log(TOTCHOL)+log(AGE)+log(SYSBP_UT+1)+
+                 log(SYSBP_T+1)+CURSMOKE+DIABETES, data = df_comb_women, family = binomial())
+
+prob_women <- predict(inv_odds_model_women, df_comb_women, type = "response")
+
+inv_prob_women <- (prob_women/(1-prob_women))^(-1)
+
+
+```
+
+
+```{r}
+### Brier score - nhanes
+
+sum(inv_prob_women[1:length(framingham_df_women$CVD)]*(framingham_df_women$CVD - prob_women [1:length (framingham_df_women$CVD)]) ^2) / nrow(nhanes_women)
+
+
+sum(inv_prob_men[1:length(framingham_df_men$CVD)]*(framingham_df_men$CVD - prob_men [1:length (framingham_df_men$CVD)]) ^2) / nrow(nhanes_men)
+
+
+```
+
+
+```{r}
+#### Brier score - framingham
+
+prob_men_fram <- predict(mod_men, framingham_df_men, type = "response")
+brier_men_fram <- sum((framingham_df_men$CVD - prob_men_fram)^2)/nrow(framingham_df_men)
+
+brier_men_fram
+
+prob_women_fram <- predict(mod_women, framingham_df_women, type = "response")
+brier_women_fram <- sum((framingham_df_women$CVD - prob_women_fram)^2)/nrow(framingham_df_women)
+
+brier_women_fram
+
+```
+
+```{r}
+### Continuous variables
+df_fram_men_cont <- framingham_df_men %>%
+  dplyr::select(HDLC, TOTCHOL, AGE, SYSBP) %>%    
+  mutate(HDLC_LOG = log(HDLC),
+             TOTCHOL_LOG = log(TOTCHOL),
+             AGE_LOG = log(AGE),
+             SYSBP_LOG = log(SYSBP)) %>%
+  dplyr::select(-HDLC, -TOTCHOL, -AGE, -SYSBP)
+
+
+##### Continuous LOG+DISc
+
+fram_log_men_complete <- cbind(df_fram_men_cont,framingham_df_men$BPMEDS, framingham_df_men$CURSMOKE, framingham_df_men$DIABETES)
+
+fram_log_men_complete$SYSBP_UT <- ifelse(framingham_df_men$BPMEDS == 0, 
+                                         fram_log_men_complete$SYSBP_LOG, 0)
+
+fram_log_men_complete$SYSBP_T <- ifelse(framingham_df_men$BPMEDS == 1, 
+                                        fram_log_men_complete$SYSBP_LOG, 0)
+
+
+colnames(fram_log_men_complete) <- c(
+  "HDLC_LOG", "TOTCHOL_LOG", "AGE_LOG", "SYSBP_LOG",
+  "BPMEDS", "CURSMOKE", "DIABETES", "SYSBP_UT_LOG", "SYSBP_T_LOG"
+)
+
+
+#fram_log_men_complete
+```
+
+
+```{r}
+### correlations
+
+###### setting 1 - framingham dataset correlation
+corr_set1 <- cov(df_fram_men_cont)
+corr_set1 <- cor(df_fram_men_cont)
+corr_set1
+
+
+#### setting 2 - no correlation
+sd_fram_men_cont <- df_fram_men_cont %>%
+  summarize_if(is.numeric, sd)
+diag_sd <- diag(sd_fram_men_cont)
+
+corr_set2 <- diag(1, 4)
+colnames(corr_set2) <- c("HDLC_LOG", "TOTCHOL_LOG", "AGE_LOG", "SYSBP_LOG")
+rownames(corr_set2) <- c("HDLC_LOG", "TOTCHOL_LOG", "AGE_LOG", "SYSBP_LOG")
+corr_set2
+
+#### setting 3 - high correlation
+
+# Create a 4x4 matrix with random data
+set.seed(123)  
+high_corr_values <- matrix(c(
+  1.00, 0.70, 0.80, 0.90, 
+  0.80, 1.00, 0.90, 0.70,
+  0.90, 0.70, 1.00, 0.80,
+  0.70, 0.80, 0.90, 1.00
+), nrow = 4, byrow = TRUE)
+
+# Ensure the matrix is positive definite
+corr_set3 <- nearPD(high_corr_values)$mat
+
+# Convert to a regular matrix
+corr_set3 <- as.matrix(corr_set3)
+
+# Rename columns and rows
+colnames(corr_set3) <- c("HDLC_LOG", "TOTCHOL_LOG", "AGE_LOG", "SYSBP_LOG")
+rownames(corr_set3) <- c("HDLC_LOG", "TOTCHOL_LOG", "AGE_LOG", "SYSBP_LOG")
+
+corr_set3
+
+
+
+corrplot(corr_set1)
+corrplot(corr_set2)
+corrplot(corr_set3)
+
+```
+
+
+```{r}
+#### simulation
+
+
+mean_fram_men_cont <- df_fram_men_cont %>%
+  summarize_if(is.numeric, mean)
+
+data_corr_set1 <- mvrnorm(1000,as.numeric(mean_fram_men_cont),corr_set1)
+data_corr_set2 <- mvrnorm(1000,as.numeric(mean_fram_men_cont),corr_set2)
+data_corr_set3 <- mvrnorm(1000,as.numeric(mean_fram_men_cont),corr_set3)
+
+data_corr_set1
+data_corr_set2
+data_corr_set3
+```
+
+```{r}
+### discrete variables
+
+prob_BPMEDS <- (sum(nhanes_men$BPMEDS == 1))/length(nhanes_men$BPMEDS)
+prob_BPMEDS 
+
+rand_v_BPMEDS <- rbinom(1000, 1, 0.1124314)
+rand_v_BPMEDS
+
+prob_CURSMOKE <- (sum(nhanes_men$CURSMOKE == 1))/length(nhanes_men$CURSMOKE)
+prob_CURSMOKE
+
+rand_v_CURSMOKE <- rbinom(1000, 1, 0.3884826)
+rand_v_CURSMOKE
+
+prob_DIABETES <- (sum(nhanes_men$DIABETES == 1))/length(nhanes_men$DIABETES)
+prob_DIABETES
+
+rand_v_DIABETES <- rbinom(1000, 1, 0.08775137)
+rand_v_DIABETES
+
+df_nhanes_men_disc <- cbind(rand_v_BPMEDS, rand_v_CURSMOKE, rand_v_DIABETES)
+df_nhanes_men_disc <- as.data.frame(df_nhanes_men_disc)
+df_nhanes_men_disc
+```
+
+
+```{r}
+#### combine simulated datasets (discr_simul + simulated data for continuous)
+df_men_sim1 <- cbind(data_corr_set1, df_nhanes_men_disc)
+df_men_sim2 <- cbind(data_corr_set2, df_nhanes_men_disc)
+df_men_sim3 <- cbind(data_corr_set3, df_nhanes_men_disc)
+
+df_men_sim1 <- as.data.frame(df_men_sim1)
+df_men_sim2 <- as.data.frame(df_men_sim2)
+df_men_sim3 <- as.data.frame(df_men_sim3)
+
+df_men_sim1$SYSBP_UT_LOG <- ifelse(df_men_sim1$rand_v_BPMEDS == 0, 
+                                 df_men_sim1$SYSBP_LOG, 0)
+df_men_sim1$SYSBP_T_LOG <- ifelse(df_men_sim1$rand_v_BPMEDS == 1, 
+                                df_men_sim1$SYSBP_LOG, 0)
+
+df_men_sim2$SYSBP_UT_LOG <- ifelse(df_men_sim2$rand_v_BPMEDS == 0, 
+                                 df_men_sim2$SYSBP_LOG, 0)
+df_men_sim2$SYSBP_T_LOG <- ifelse(df_men_sim2$rand_v_BPMEDS == 1, 
+                                df_men_sim2$SYSBP_LOG, 0)
+
+df_men_sim3$SYSBP_UT_LOG <- ifelse(df_men_sim3$rand_v_BPMEDS == 0, 
+                                 df_men_sim3$SYSBP_LOG, 0)
+df_men_sim3$SYSBP_T_LOG <- ifelse(df_men_sim3$rand_v_BPMEDS == 1, 
+                                df_men_sim3$SYSBP_LOG, 0)
+
+df_men_sim1
+df_men_sim2
+df_men_sim3
+
+### brier score
+sum(inv_prob_men[1:length(framingham_df_men$CVD)]*(framingham_df_men$CVD - prob_men [1:length (framingham_df_men$CVD)]) ^2) / nrow(nhanes_men)
+```
+
+
+```{r}
+########## brier score for setting 1##################
+
+### Create S population indicator 
+fram_log_men_complete <- fram_log_men_complete %>% mutate(S = 1)
+df_men_sim1 <- df_men_sim1 %>% mutate(S = 0)
+
+##### Combine dataframes
+
+#### Rename columns
+colnames(df_men_sim1)[colnames(df_men_sim1) == "rand_v_BPMEDS"] <- "BPMEDS"
+colnames(df_men_sim1)[colnames(df_men_sim1) == "rand_v_CURSMOKE"] <- "CURSMOKE"
+colnames(df_men_sim1)[colnames(df_men_sim1) == "rand_v_DIABETES"] <- "DIABETES"
+
+
+
+### Combine two datasets
+df_men_sim1_complete <- rbind(fram_log_men_complete, df_men_sim1)
+
+df_men_sim1_complete
+
+
+##### Estimate inverse-odds #####
+
+### Fit a model to estimate Pr[S=1|X] for df_men_sim1_complete
+inv_odds_model_df_men_sim1_complete <- glm(S ~ HDLC_LOG + TOTCHOL_LOG + AGE_LOG + SYSBP_UT_LOG +
+                 SYSBP_T_LOG + CURSMOKE + DIABETES, data = df_men_sim1_complete, family = binomial)
+
+prob_df_men_sim1_complete <- predict(inv_odds_model_df_men_sim1_complete, df_men_sim1_complete, type = "response")
+
+inv_prob_men_sim1_complete <- (prob_df_men_sim1_complete/(1-prob_df_men_sim1_complete))^(-1)
+
+inv_prob_men_sim1_complete
+
+
+### brier score - setting 1
+sum(inv_prob_men_sim1_complete[1:length(framingham_df_men$CVD)]*(framingham_df_men$CVD - prob_df_men_sim1_complete [1:length (framingham_df_men$CVD)]) ^2) / nrow(df_men_sim1)
+
+```
+
+
+```{r}
+brier_sim1_men <- numeric(0) 
+  for (i in 1:1000) {
+  data_corr_set1 <- mvrnorm(1000,as.numeric(mean_fram_men_cont),corr_set1)
+  
+
+rand_v_BPMEDS <- rbinom(1000, 1, prob_BPMEDS)
+
+
+rand_v_CURSMOKE <- rbinom(1000, 1, prob_CURSMOKE)
+
+
+rand_v_DIABETES <- rbinom(1000, 1, prob_DIABETES)
+
+
+df_nhanes_men_disc <- cbind(rand_v_BPMEDS, rand_v_CURSMOKE, rand_v_DIABETES)
+df_nhanes_men_disc <- as.data.frame(df_nhanes_men_disc)
+
+
+
+df_men_sim1 <- cbind(data_corr_set1, df_nhanes_men_disc)
+
+df_men_sim1 <- as.data.frame(df_men_sim1)
+
+
+df_men_sim1$SYSBP_UT_LOG <- ifelse(df_men_sim1$rand_v_BPMEDS == 0, 
+                                 df_men_sim1$SYSBP_LOG, 0)
+df_men_sim1$SYSBP_T_LOG <- ifelse(df_men_sim1$rand_v_BPMEDS == 1, 
+                                df_men_sim1$SYSBP_LOG, 0)
+
+### Create S population indicator 
+fram_log_men_complete <- fram_log_men_complete %>% mutate(S = 1)
+df_men_sim1 <- df_men_sim1 %>% mutate(S = 0)
+
+##### Combine dataframes
+
+#### Rename columns
+colnames(df_men_sim1)[colnames(df_men_sim1) == "rand_v_BPMEDS"] <- "BPMEDS"
+colnames(df_men_sim1)[colnames(df_men_sim1) == "rand_v_CURSMOKE"] <- "CURSMOKE"
+colnames(df_men_sim1)[colnames(df_men_sim1) == "rand_v_DIABETES"] <- "DIABETES"
+
+
+
+### Combine two datasets
+df_men_sim1_complete <- rbind(fram_log_men_complete, df_men_sim1)
+
+
+
+##### Estimate inverse-odds #####
+
+### Fit a model to estimate Pr[S=1|X] for df_men_sim1_complete
+inv_odds_model_df_men_sim1_complete <- glm(S ~ HDLC_LOG + TOTCHOL_LOG + AGE_LOG + SYSBP_UT_LOG +
+                 SYSBP_T_LOG + CURSMOKE + DIABETES, data = df_men_sim1_complete, family = binomial)
+
+prob_df_men_sim1_complete <- predict(inv_odds_model_df_men_sim1_complete, df_men_sim1_complete, type = "response")
+
+inv_prob_men_sim1_complete <- (prob_df_men_sim1_complete/(1-prob_df_men_sim1_complete))^(-1)
+
+
+
+
+### brier score
+brier_sim1_men[i] <- sum(inv_prob_men_sim1_complete[1:length(framingham_df_men$CVD)]*(framingham_df_men$CVD - prob_df_men_sim1_complete [1:length (framingham_df_men$CVD)]) ^2) / nrow(df_men_sim1)
+print(i)
+  }
+
+```
+
+```{r}
+###### simulation brier score - setting 1
+
+mean(brier_sim1_men)
+
+sd(brier_sim1_men)
+```
+
+
+```{r}
+########## brier score for setting 2##################
+
+### Create S population indicator 
+fram_log_men_complete <- fram_log_men_complete %>% mutate(S = 1)
+df_men_sim2 <- df_men_sim2 %>% mutate(S = 0)
+
+##### Combine dataframes
+
+#### Rename columns
+colnames(df_men_sim2)[colnames(df_men_sim2) == "rand_v_BPMEDS"] <- "BPMEDS"
+colnames(df_men_sim2)[colnames(df_men_sim2) == "rand_v_CURSMOKE"] <- "CURSMOKE"
+colnames(df_men_sim2)[colnames(df_men_sim2) == "rand_v_DIABETES"] <- "DIABETES"
+
+
+
+
+
+### Combine two datasets
+df_men_sim2_complete <- rbind(fram_log_men_complete, df_men_sim2)
+
+df_men_sim2_complete
+
+
+##### Estimate inverse-odds #####
+
+### Fit a model to estimate Pr[S=1|X] for df_men_sim1_complete
+inv_odds_model_df_men_sim2_complete <- glm(S ~ HDLC_LOG + TOTCHOL_LOG + AGE_LOG + SYSBP_UT_LOG +
+                 SYSBP_T_LOG + CURSMOKE + DIABETES, data = df_men_sim2_complete, family = binomial)
+
+prob_df_men_sim2_complete <- predict(inv_odds_model_df_men_sim2_complete, df_men_sim2_complete, type = "response")
+
+inv_prob_men_sim2_complete <- (prob_df_men_sim2_complete/(1-prob_df_men_sim2_complete))^(-1)
+
+inv_prob_men_sim2_complete
+
+
+### brier score - setting 2
+sum(inv_prob_men_sim2_complete[1:length(framingham_df_men$CVD)]*(framingham_df_men$CVD - prob_df_men_sim2_complete [1:length (framingham_df_men$CVD)]) ^2) / nrow(df_men_sim2)
+
+```
+
+
+```{r}
+brier_sim2_men <- numeric(0) 
+  for (i in 1:1000) {
+  data_corr_set2 <- mvrnorm(1000,as.numeric(mean_fram_men_cont),corr_set2)
+  
+
+rand_v_BPMEDS <- rbinom(1000, 1, prob_BPMEDS)
+
+
+rand_v_CURSMOKE <- rbinom(1000, 1, prob_CURSMOKE)
+
+
+rand_v_DIABETES <- rbinom(1000, 1, prob_DIABETES)
+
+
+df_nhanes_men_disc <- cbind(rand_v_BPMEDS, rand_v_CURSMOKE, rand_v_DIABETES)
+df_nhanes_men_disc <- as.data.frame(df_nhanes_men_disc)
+
+
+
+df_men_sim2 <- cbind(data_corr_set2, df_nhanes_men_disc)
+
+df_men_sim2 <- as.data.frame(df_men_sim2)
+
+
+df_men_sim2$SYSBP_UT_LOG <- ifelse(df_men_sim2$rand_v_BPMEDS == 0, 
+                                 df_men_sim2$SYSBP_LOG, 0)
+df_men_sim2$SYSBP_T_LOG <- ifelse(df_men_sim2$rand_v_BPMEDS == 1, 
+                                df_men_sim2$SYSBP_LOG, 0)
+
+### Create S population indicator 
+fram_log_men_complete <- fram_log_men_complete %>% mutate(S = 1)
+df_men_sim2 <- df_men_sim2 %>% mutate(S = 0)
+
+##### Combine dataframes
+
+#### Rename columns
+colnames(df_men_sim2)[colnames(df_men_sim2) == "rand_v_BPMEDS"] <- "BPMEDS"
+colnames(df_men_sim2)[colnames(df_men_sim2) == "rand_v_CURSMOKE"] <- "CURSMOKE"
+colnames(df_men_sim2)[colnames(df_men_sim2) == "rand_v_DIABETES"] <- "DIABETES"
+
+
+
+### Combine two datasets
+df_men_sim2_complete <- rbind(fram_log_men_complete, df_men_sim2)
+
+
+
+
+##### Estimate inverse-odds #####
+
+### Fit a model to estimate Pr[S=1|X] for df_men_sim1_complete
+inv_odds_model_df_men_sim2_complete <- glm(S ~ HDLC_LOG + TOTCHOL_LOG + AGE_LOG + SYSBP_UT_LOG +
+                 SYSBP_T_LOG + CURSMOKE + DIABETES, data = df_men_sim2_complete, family = binomial)
+
+prob_df_men_sim2_complete <- predict(inv_odds_model_df_men_sim2_complete, df_men_sim2_complete, type = "response")
+
+inv_prob_men_sim2_complete <- (prob_df_men_sim2_complete/(1-prob_df_men_sim2_complete))^(-1)
+
+
+
+
+### brier score
+brier_sim2_men[i] <- sum(inv_prob_men_sim2_complete[1:length(framingham_df_men$CVD)]*(framingham_df_men$CVD - prob_df_men_sim2_complete [1:length (framingham_df_men$CVD)]) ^2) / nrow(df_men_sim2)
+print(i)
+  }
+
+```
+
+
+```{r}
+
+########simulation brier score - setting 2
+
+mean(brier_sim2_men)
+
+sd(brier_sim2_men)
+```
+
+
+```{r}
+########## brier score for setting 3##################
+
+### Create S population indicator 
+fram_log_men_complete <- fram_log_men_complete %>% mutate(S = 1)
+df_men_sim3 <- df_men_sim2 %>% mutate(S = 0)
+
+##### Combine dataframes
+
+#### Rename columns
+colnames(df_men_sim3)[colnames(df_men_sim3) == "rand_v_BPMEDS"] <- "BPMEDS"
+colnames(df_men_sim3)[colnames(df_men_sim3) == "rand_v_CURSMOKE"] <- "CURSMOKE"
+colnames(df_men_sim3)[colnames(df_men_sim3) == "rand_v_DIABETES"] <- "DIABETES"
+
+
+
+### Combine two datasets
+df_men_sim3_complete <- rbind(fram_log_men_complete, df_men_sim3)
+
+df_men_sim3_complete
+
+
+##### Estimate inverse-odds #####
+
+### Fit a model to estimate Pr[S=1|X] for df_men_sim1_complete
+inv_odds_model_df_men_sim3_complete <- glm(S ~ HDLC_LOG + TOTCHOL_LOG + AGE_LOG + SYSBP_UT_LOG +
+                 SYSBP_T_LOG + CURSMOKE + DIABETES, data = df_men_sim3_complete, family = binomial)
+
+prob_df_men_sim3_complete <- predict(inv_odds_model_df_men_sim3_complete, df_men_sim3_complete, type = "response")
+
+inv_prob_men_sim3_complete <- (prob_df_men_sim3_complete/(1-prob_df_men_sim3_complete))^(-1)
+
+inv_prob_men_sim3_complete
+
+
+### brier score - setting 3
+sum(inv_prob_men_sim3_complete[1:length(framingham_df_men$CVD)]*(framingham_df_men$CVD - prob_df_men_sim3_complete [1:length (framingham_df_men$CVD)]) ^2) / nrow(df_men_sim3)
+
+```
+
+
+```{r}
+brier_sim3_men <- numeric(0) 
+  for (i in 1:1000) {
+  data_corr_set3 <- mvrnorm(1000,as.numeric(mean_fram_men_cont),corr_set3)
+  
+
+rand_v_BPMEDS <- rbinom(1000, 1, prob_BPMEDS)
+
+
+rand_v_CURSMOKE <- rbinom(1000, 1, prob_CURSMOKE)
+
+
+rand_v_DIABETES <- rbinom(1000, 1, prob_DIABETES)
+
+
+df_nhanes_men_disc <- cbind(rand_v_BPMEDS, rand_v_CURSMOKE, rand_v_DIABETES)
+df_nhanes_men_disc <- as.data.frame(df_nhanes_men_disc)
+
+
+
+df_men_sim3 <- cbind(data_corr_set3, df_nhanes_men_disc)
+
+df_men_sim3 <- as.data.frame(df_men_sim3)
+
+
+df_men_sim3$SYSBP_UT_LOG <- ifelse(df_men_sim3$rand_v_BPMEDS == 0, 
+                                 df_men_sim3$SYSBP_LOG, 0)
+df_men_sim3$SYSBP_T_LOG <- ifelse(df_men_sim3$rand_v_BPMEDS == 1, 
+                                df_men_sim3$SYSBP_LOG, 0)
+
+### Create S population indicator 
+fram_log_men_complete <- fram_log_men_complete %>% mutate(S = 1)
+df_men_sim3 <- df_men_sim3 %>% mutate(S = 0)
+
+##### Combine dataframes
+
+#### Rename columns
+colnames(df_men_sim3)[colnames(df_men_sim3) == "rand_v_BPMEDS"] <- "BPMEDS"
+colnames(df_men_sim3)[colnames(df_men_sim3) == "rand_v_CURSMOKE"] <- "CURSMOKE"
+colnames(df_men_sim3)[colnames(df_men_sim3) == "rand_v_DIABETES"] <- "DIABETES"
+
+
+### Combine two datasets
+df_men_sim3_complete <- rbind(fram_log_men_complete, df_men_sim3)
+
+
+##### Estimate inverse-odds #####
+
+### Fit a model to estimate Pr[S=1|X] for df_men_sim1_complete
+inv_odds_model_df_men_sim3_complete <- glm(S ~ HDLC_LOG + TOTCHOL_LOG + AGE_LOG + SYSBP_UT_LOG +
+                 SYSBP_T_LOG + CURSMOKE + DIABETES, data = df_men_sim3_complete, family = binomial)
+
+prob_df_men_sim3_complete <- predict(inv_odds_model_df_men_sim3_complete, df_men_sim3_complete, type = "response")
+
+inv_prob_men_sim3_complete <- (prob_df_men_sim3_complete/(1-prob_df_men_sim3_complete))^(-1)
+
+
+
+
+### brier score
+brier_sim3_men[i] <- sum(inv_prob_men_sim3_complete[1:length(framingham_df_men$CVD)]*(framingham_df_men$CVD - prob_df_men_sim3_complete [1:length (framingham_df_men$CVD)]) ^2) / nrow(df_men_sim3)
+print(i)
+  }
+
+```
+
+```{r}
+########simulation brier score - setting 3
+
+mean(brier_sim3_men)
+
+sd(brier_sim3_men)
+```
+
+######################################################################
+
+##################  WOMEN  ###########################################
+
+###################################################################
+
+```{r}
+###continuous 
+df_fram_women_cont <- framingham_df_women %>%
+  dplyr::select(HDLC, TOTCHOL, AGE, SYSBP) %>%    
+  mutate(HDLC_LOG = log(HDLC),
+             TOTCHOL_LOG = log(TOTCHOL),
+             AGE_LOG = log(AGE),
+             SYSBP_LOG = log(SYSBP)) %>%
+  dplyr::select(-HDLC, -TOTCHOL, -AGE, -SYSBP)
+
+
+##### cont LOG+DISc
+
+fram_log_women_complete <- cbind(df_fram_women_cont,framingham_df_women$BPMEDS, framingham_df_women$CURSMOKE, framingham_df_women$DIABETES)
+
+fram_log_women_complete$SYSBP_UT <- ifelse(framingham_df_women$BPMEDS == 0, 
+                                         fram_log_women_complete$SYSBP_LOG, 0)
+
+fram_log_women_complete$SYSBP_T <- ifelse(framingham_df_women$BPMEDS == 1, 
+                                        fram_log_women_complete$SYSBP_LOG, 0)
+
+
+colnames(fram_log_women_complete) <- c(
+  "HDLC_LOG", "TOTCHOL_LOG", "AGE_LOG", "SYSBP_LOG",
+  "BPMEDS", "CURSMOKE", "DIABETES", "SYSBP_UT_LOG", "SYSBP_T_LOG"
+)
+
+
+#fram_log_women_complete
+```
+
+```{r}
+### correlations
+
+###### setting 1 - fram corr
+corr_set1 <- cov(df_fram_women_cont)
+corr_set1 <- cor(df_fram_women_cont)
+corr_set1
+
+
+#### setting 2 - no corre
+sd_fram_women_cont <- df_fram_women_cont %>%
+  summarize_if(is.numeric, sd)
+diag_sd <- diag(sd_fram_women_cont)
+
+corr_set2 <- diag(1, 4)
+colnames(corr_set2) <- c("HDLC_LOG", "TOTCHOL_LOG", "AGE_LOG", "SYSBP_LOG")
+rownames(corr_set2) <- c("HDLC_LOG", "TOTCHOL_LOG", "AGE_LOG", "SYSBP_LOG")
+corr_set2
+
+#### setting 3 - high corr
+
+# Create a 4x4 matrix with random data
+set.seed(123)  
+high_corr_values <- matrix(c(
+  1.00, 0.70, 0.80, 0.90, 
+  0.80, 1.00, 0.90, 0.70,
+  0.90, 0.70, 1.00, 0.80,
+  0.70, 0.80, 0.90, 1.00
+), nrow = 4, byrow = TRUE)
+
+# Ensure the matrix is positive definite
+corr_set3 <- nearPD(high_corr_values)$mat
+
+# Convert to a regular matrix
+corr_set3 <- as.matrix(corr_set3)
+
+# Rename columns and rows
+colnames(corr_set3) <- c("HDLC_LOG", "TOTCHOL_LOG", "AGE_LOG", "SYSBP_LOG")
+rownames(corr_set3) <- c("HDLC_LOG", "TOTCHOL_LOG", "AGE_LOG", "SYSBP_LOG")
+
+corr_set3
+
+
+corrplot(corr_set1)
+corrplot(corr_set2)
+corrplot(corr_set3)
+
+```
+
+```{r}
+#### simulation
+
+mean_fram_women_cont <- df_fram_women_cont %>%
+  summarize_if(is.numeric, mean)
+data_corr_set1 <- mvrnorm(1000,as.numeric(mean_fram_women_cont),corr_set1)
+data_corr_set2 <- mvrnorm(1000,as.numeric(mean_fram_women_cont),corr_set2)
+data_corr_set3 <- mvrnorm(1000,as.numeric(mean_fram_women_cont),corr_set3)
+
+#data_corr_set1
+#data_corr_set2
+#data_corr_set3
+```
+
+```{r}
+### discrete 
+
+prob_BPMEDS <- (sum(nhanes_women$BPMEDS == 1))/length(nhanes_women$BPMEDS)
+prob_BPMEDS 
+
+rand_v_BPMEDS <- rbinom(1000, 1, 0.1124314)
+rand_v_BPMEDS
+
+prob_CURSMOKE <- (sum(nhanes_women$CURSMOKE == 1))/length(nhanes_women$CURSMOKE)
+prob_CURSMOKE
+
+rand_v_CURSMOKE <- rbinom(1000, 1, 0.3884826)
+rand_v_CURSMOKE
+
+prob_DIABETES <- (sum(nhanes_women$DIABETES == 1))/length(nhanes_women$DIABETES)
+prob_DIABETES
+
+rand_v_DIABETES <- rbinom(1000, 1, 0.08775137)
+rand_v_DIABETES
+
+df_nhanes_women_disc <- cbind(rand_v_BPMEDS, rand_v_CURSMOKE, rand_v_DIABETES)
+df_nhanes_women_disc <- as.data.frame(df_nhanes_women_disc)
+df_nhanes_women_disc
+```
+
+```{r}
+#### discr_simul + simulated data for contin
+df_women_sim1 <- cbind(data_corr_set1, df_nhanes_women_disc)
+df_women_sim2 <- cbind(data_corr_set2, df_nhanes_women_disc)
+df_women_sim3 <- cbind(data_corr_set3, df_nhanes_women_disc)
+
+df_women_sim1 <- as.data.frame(df_women_sim1)
+df_women_sim2 <- as.data.frame(df_women_sim2)
+df_women_sim3 <- as.data.frame(df_women_sim3)
+
+df_women_sim1$SYSBP_UT_LOG <- ifelse(df_women_sim1$rand_v_BPMEDS == 0, 
+                                 df_women_sim1$SYSBP_LOG, 0)
+df_women_sim1$SYSBP_T_LOG <- ifelse(df_women_sim1$rand_v_BPMEDS == 1, 
+                                df_women_sim1$SYSBP_LOG, 0)
+
+df_women_sim2$SYSBP_UT_LOG <- ifelse(df_women_sim2$rand_v_BPMEDS == 0, 
+                                 df_women_sim2$SYSBP_LOG, 0)
+df_women_sim2$SYSBP_T_LOG <- ifelse(df_women_sim2$rand_v_BPMEDS == 1, 
+                                df_women_sim2$SYSBP_LOG, 0)
+
+df_women_sim3$SYSBP_UT_LOG <- ifelse(df_women_sim3$rand_v_BPMEDS == 0, 
+                                 df_women_sim3$SYSBP_LOG, 0)
+df_women_sim3$SYSBP_T_LOG <- ifelse(df_women_sim3$rand_v_BPMEDS == 1, 
+                                df_women_sim3$SYSBP_LOG, 0)
+
+df_women_sim1
+df_women_sim2
+df_women_sim3
+
+  ### brier score
+  sum(inv_prob_women[1:length(framingham_df_women$CVD)]*(framingham_df_women$CVD - prob_women [1:length (framingham_df_women$CVD)]) ^2) / nrow(nhanes_women)
+```
+
+```{r}
+########## brier score for setting 1##################
+
+### Create S population indicator 
+fram_log_women_complete <- fram_log_women_complete %>% mutate(S = 1)
+df_women_sim1 <- df_women_sim1 %>% mutate(S = 0)
+
+##### Combine dataframes
+
+#### Rename columns
+colnames(df_women_sim1)[colnames(df_women_sim1) == "rand_v_BPMEDS"] <- "BPMEDS"
+colnames(df_women_sim1)[colnames(df_women_sim1) == "rand_v_CURSMOKE"] <- "CURSMOKE"
+colnames(df_women_sim1)[colnames(df_women_sim1) == "rand_v_DIABETES"] <- "DIABETES"
+
+
+
+
+
+### Combine two datasets
+df_women_sim1_complete <- rbind(fram_log_women_complete, df_men_sim1)
+
+df_women_sim1_complete
+
+
+##### Estimate inverse-odds #####
+
+### Fit a model to estimate Pr[S=1|X] for df_men_sim1_complete
+inv_odds_model_df_women_sim1_complete <- glm(S ~ HDLC_LOG + TOTCHOL_LOG + AGE_LOG + SYSBP_UT_LOG +
+                 SYSBP_T_LOG + CURSMOKE + DIABETES, data = df_women_sim1_complete, family = binomial)
+
+prob_df_women_sim1_complete <- predict(inv_odds_model_df_women_sim1_complete, df_women_sim1_complete, type = "response")
+
+inv_prob_women_sim1_complete <- (prob_df_women_sim1_complete/(1-prob_df_women_sim1_complete))^(-1)
+
+inv_prob_women_sim1_complete
+
+
+### brier score - setting 1
+sum(inv_prob_women_sim1_complete[1:length(framingham_df_women$CVD)]*(framingham_df_women$CVD - prob_df_women_sim1_complete [1:length (framingham_df_women$CVD)]) ^2) / nrow(df_women_sim1)
+
+```
+
+```{r}
+brier_sim1_women <- numeric(0) 
+  for (i in 1:1000) {
+  data_corr_set1 <- mvrnorm(1000,as.numeric(mean_fram_women_cont),corr_set1)
+  
+
+rand_v_BPMEDS <- rbinom(1000, 1, prob_BPMEDS)
+
+
+rand_v_CURSMOKE <- rbinom(1000, 1, prob_CURSMOKE)
+
+
+rand_v_DIABETES <- rbinom(1000, 1, prob_DIABETES)
+
+
+df_nhanes_women_disc <- cbind(rand_v_BPMEDS, rand_v_CURSMOKE, rand_v_DIABETES)
+df_nhanes_women_disc <- as.data.frame(df_nhanes_women_disc)
+
+
+
+df_women_sim1 <- cbind(data_corr_set1, df_nhanes_women_disc)
+
+df_women_sim1 <- as.data.frame(df_women_sim1)
+
+
+df_women_sim1$SYSBP_UT_LOG <- ifelse(df_women_sim1$rand_v_BPMEDS == 0, 
+                                 df_women_sim1$SYSBP_LOG, 0)
+df_women_sim1$SYSBP_T_LOG <- ifelse(df_women_sim1$rand_v_BPMEDS == 1, 
+                                df_women_sim1$SYSBP_LOG, 0)
+
+### Create S population indicator 
+fram_log_women_complete <- fram_log_women_complete %>% mutate(S = 1)
+df_women_sim1 <- df_women_sim1 %>% mutate(S = 0)
+
+##### Combine dataframes
+
+#### Rename columns
+colnames(df_women_sim1)[colnames(df_women_sim1) == "rand_v_BPMEDS"] <- "BPMEDS"
+colnames(df_women_sim1)[colnames(df_women_sim1) == "rand_v_CURSMOKE"] <- "CURSMOKE"
+colnames(df_women_sim1)[colnames(df_women_sim1) == "rand_v_DIABETES"] <- "DIABETES"
+
+
+
+### Combine two datasets
+df_women_sim1_complete <- rbind(fram_log_women_complete, df_women_sim1)
+
+
+
+
+##### Estimate inverse-odds #####
+
+### Fit a model to estimate Pr[S=1|X] for df_women_sim1_complete
+inv_odds_model_df_women_sim1_complete <- glm(S ~ HDLC_LOG + TOTCHOL_LOG + AGE_LOG + SYSBP_UT_LOG +
+                 SYSBP_T_LOG + CURSMOKE + DIABETES, data = df_women_sim1_complete, family = binomial)
+
+prob_df_women_sim1_complete <- predict(inv_odds_model_df_women_sim1_complete, df_women_sim1_complete, type = "response")
+
+inv_prob_women_sim1_complete <- (prob_df_women_sim1_complete/(1-prob_df_women_sim1_complete))^(-1)
+
+
+
+
+### brier score
+brier_sim1_women[i] <- sum(inv_prob_women_sim1_complete[1:length(framingham_df_women$CVD)]*(framingham_df_women$CVD - prob_df_women_sim1_complete [1:length (framingham_df_women$CVD)]) ^2) / nrow(df_women_sim1)
+#print(i)
+  }
+
+```
+
+```{r}
+
+############## simulation brier score - setting 1
+
+mean(brier_sim1_women)
+
+sd(brier_sim1_women)
+```
+
+```{r}
+########## brier score for setting 2##################
+
+### Create S population indicator 
+fram_log_women_complete <- fram_log_women_complete %>% mutate(S = 1)
+df_women_sim2 <- df_women_sim2 %>% mutate(S = 0)
+
+##### Combine dataframes
+
+#### Rename columns
+colnames(df_women_sim2)[colnames(df_women_sim2) == "rand_v_BPMEDS"] <- "BPMEDS"
+colnames(df_women_sim2)[colnames(df_women_sim2) == "rand_v_CURSMOKE"] <- "CURSMOKE"
+colnames(df_women_sim2)[colnames(df_women_sim2) == "rand_v_DIABETES"] <- "DIABETES"
+
+
+
+
+
+### Combine two datasets
+df_women_sim2_complete <- rbind(fram_log_women_complete, df_men_sim2)
+
+df_women_sim2_complete
+
+
+##### Estimate inverse-odds #####
+
+### Fit a model to estimate Pr[S=1|X] for df_women_sim1_complete
+inv_odds_model_df_women_sim2_complete <- glm(S ~ HDLC_LOG + TOTCHOL_LOG + AGE_LOG + SYSBP_UT_LOG +
+                 SYSBP_T_LOG + CURSMOKE + DIABETES, data = df_women_sim2_complete, family = binomial)
+
+prob_df_women_sim2_complete <- predict(inv_odds_model_df_women_sim2_complete, df_women_sim2_complete, type = "response")
+
+inv_prob_women_sim2_complete <- (prob_df_women_sim2_complete/(1-prob_df_women_sim2_complete))^(-1)
+
+inv_prob_women_sim2_complete
+
+
+### brier score - setting 2
+sum(inv_prob_women_sim2_complete[1:length(framingham_df_women$CVD)]*(framingham_df_women$CVD - prob_df_women_sim2_complete [1:length (framingham_df_women$CVD)]) ^2) / nrow(df_women_sim2)
+
+```
+
+```{r}
+brier_sim2_women <- numeric(0) 
+  for (i in 1:1000) {
+  data_corr_set2 <- mvrnorm(1000,as.numeric(mean_fram_women_cont),corr_set2)
+  
+
+rand_v_BPMEDS <- rbinom(1000, 1, prob_BPMEDS)
+
+
+rand_v_CURSMOKE <- rbinom(1000, 1, prob_CURSMOKE)
+
+
+rand_v_DIABETES <- rbinom(1000, 1, prob_DIABETES)
+
+
+df_nhanes_women_disc <- cbind(rand_v_BPMEDS, rand_v_CURSMOKE, rand_v_DIABETES)
+df_nhanes_women_disc <- as.data.frame(df_nhanes_women_disc)
+
+
+
+df_women_sim2 <- cbind(data_corr_set2, df_nhanes_women_disc)
+
+df_women_sim2 <- as.data.frame(df_women_sim2)
+
+
+df_women_sim2$SYSBP_UT_LOG <- ifelse(df_women_sim2$rand_v_BPMEDS == 0, 
+                                 df_women_sim2$SYSBP_LOG, 0)
+df_women_sim2$SYSBP_T_LOG <- ifelse(df_women_sim2$rand_v_BPMEDS == 1, 
+                                df_women_sim2$SYSBP_LOG, 0)
+
+### Create S population indicator 
+fram_log_women_complete <- fram_log_women_complete %>% mutate(S = 1)
+df_women_sim2 <- df_women_sim2 %>% mutate(S = 0)
+
+##### Combine dataframes
+
+#### Rename columns
+colnames(df_women_sim2)[colnames(df_women_sim2) == "rand_v_BPMEDS"] <- "BPMEDS"
+colnames(df_women_sim2)[colnames(df_women_sim2) == "rand_v_CURSMOKE"] <- "CURSMOKE"
+colnames(df_women_sim2)[colnames(df_women_sim2) == "rand_v_DIABETES"] <- "DIABETES"
+
+
+
+### Combine two datasets
+df_women_sim2_complete <- rbind(fram_log_women_complete, df_women_sim2)
+
+
+
+
+##### Estimate inverse-odds #####
+
+### Fit a model to estimate Pr[S=1|X] for df_women_sim1_complete
+inv_odds_model_df_women_sim2_complete <- glm(S ~ HDLC_LOG + TOTCHOL_LOG + AGE_LOG + SYSBP_UT_LOG +
+                 SYSBP_T_LOG + CURSMOKE + DIABETES, data = df_women_sim2_complete, family = binomial)
+
+prob_df_women_sim2_complete <- predict(inv_odds_model_df_women_sim2_complete, df_women_sim2_complete, type = "response")
+
+inv_prob_women_sim2_complete <- (prob_df_women_sim2_complete/(1-prob_df_women_sim2_complete))^(-1)
+
+
+
+
+### brier score
+brier_sim2_women[i] <- sum(inv_prob_women_sim2_complete[1:length(framingham_df_women$CVD)]*(framingham_df_women$CVD - prob_df_women_sim2_complete [1:length (framingham_df_women$CVD)]) ^2) / nrow(df_women_sim2)
+#print(i)
+  }
+
+```
+
+
+```{r}
+###### simulation brier score - setting 2
+
+mean(brier_sim2_women)
+
+sd(brier_sim2_women)
+```
+
+
+```{r}
+########## brier score for setting 3##################
+
+### Create S population indicator 
+fram_log_women_complete <- fram_log_women_complete %>% mutate(S = 1)
+df_women_sim3 <- df_women_sim2 %>% mutate(S = 0)
+
+##### Combine dataframes
+
+#### Rename columns
+colnames(df_women_sim3)[colnames(df_women_sim3) == "rand_v_BPMEDS"] <- "BPMEDS"
+colnames(df_women_sim3)[colnames(df_women_sim3) == "rand_v_CURSMOKE"] <- "CURSMOKE"
+colnames(df_women_sim3)[colnames(df_women_sim3) == "rand_v_DIABETES"] <- "DIABETES"
+
+
+
+
+
+### Combine two datasets
+df_women_sim3_complete <- rbind(fram_log_women_complete, df_women_sim3)
+
+df_women_sim3_complete
+
+
+##### Estimate inverse-odds #####
+
+### Fit a model to estimate Pr[S=1|X] for df_men_sim1_complete
+inv_odds_model_df_women_sim3_complete <- glm(S ~ HDLC_LOG + TOTCHOL_LOG + AGE_LOG + SYSBP_UT_LOG +
+                 SYSBP_T_LOG + CURSMOKE + DIABETES, data = df_women_sim3_complete, family = binomial)
+
+prob_df_women_sim3_complete <- predict(inv_odds_model_df_women_sim3_complete, df_women_sim3_complete, type = "response")
+
+inv_prob_women_sim3_complete <- (prob_df_women_sim3_complete/(1-prob_df_women_sim3_complete))^(-1)
+
+inv_prob_women_sim3_complete
+
+
+### brier score - setting 3
+sum(inv_prob_women_sim3_complete[1:length(framingham_df_women$CVD)]*(framingham_df_women$CVD - prob_df_women_sim3_complete [1:length (framingham_df_women$CVD)]) ^2) / nrow(df_women_sim3)
+
+```
+
+```{r}
+brier_sim3_women <- numeric(0) 
+  for (i in 1:1000) {
+  data_corr_set3 <- mvrnorm(1000,as.numeric(mean_fram_women_cont),corr_set3)
+  
+
+rand_v_BPMEDS <- rbinom(1000, 1, prob_BPMEDS)
+
+
+rand_v_CURSMOKE <- rbinom(1000, 1, prob_CURSMOKE)
+
+
+rand_v_DIABETES <- rbinom(1000, 1, prob_DIABETES)
+
+
+df_nhanes_women_disc <- cbind(rand_v_BPMEDS, rand_v_CURSMOKE, rand_v_DIABETES)
+df_nhanes_women_disc <- as.data.frame(df_nhanes_women_disc)
+
+
+
+df_women_sim3 <- cbind(data_corr_set3, df_nhanes_women_disc)
+
+df_women_sim3 <- as.data.frame(df_women_sim3)
+
+
+df_women_sim3$SYSBP_UT_LOG <- ifelse(df_women_sim3$rand_v_BPMEDS == 0, 
+                                 df_women_sim3$SYSBP_LOG, 0)
+df_women_sim3$SYSBP_T_LOG <- ifelse(df_women_sim3$rand_v_BPMEDS == 1, 
+                                df_women_sim3$SYSBP_LOG, 0)
+
+### Create S population indicator 
+fram_log_women_complete <- fram_log_women_complete %>% mutate(S = 1)
+df_women_sim3 <- df_women_sim3 %>% mutate(S = 0)
+
+##### Combine dataframes
+
+#### Rename columns
+colnames(df_women_sim3)[colnames(df_women_sim3) == "rand_v_BPMEDS"] <- "BPMEDS"
+colnames(df_women_sim3)[colnames(df_women_sim3) == "rand_v_CURSMOKE"] <- "CURSMOKE"
+colnames(df_women_sim3)[colnames(df_women_sim3) == "rand_v_DIABETES"] <- "DIABETES"
+
+
+
+### Combine two datasets
+df_women_sim3_complete <- rbind(fram_log_women_complete, df_women_sim3)
+
+
+
+
+##### Estimate inverse-odds #####
+
+### Fit a model to estimate Pr[S=1|X] for df_men_sim1_complete
+inv_odds_model_df_women_sim3_complete <- glm(S ~ HDLC_LOG + TOTCHOL_LOG + AGE_LOG + SYSBP_UT_LOG +
+                 SYSBP_T_LOG + CURSMOKE + DIABETES, data = df_women_sim3_complete, family = binomial)
+
+prob_df_women_sim3_complete <- predict(inv_odds_model_df_women_sim3_complete, df_women_sim3_complete, type = "response")
+
+inv_prob_women_sim3_complete <- (prob_df_women_sim3_complete/(1-prob_df_women_sim3_complete))^(-1)
+
+
+
+
+### brier score
+brier_sim3_women[i] <- sum(inv_prob_women_sim3_complete[1:length(framingham_df_women$CVD)]*(framingham_df_women$CVD - prob_df_women_sim3_complete [1:length (framingham_df_women$CVD)]) ^2) / nrow(df_women_sim3)
+#print(i)
+  }
+
+```
+
+
+```{r}
+###### brier score - setting 3
+
+mean(brier_sim3_women)
+
+sd(brier_sim3_women)
+```

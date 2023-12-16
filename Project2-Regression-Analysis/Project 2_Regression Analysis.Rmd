@@ -1,0 +1,603 @@
+---
+title: "Predicting the need for tracheostomy in infants with severe bronchopulmonary dysplasia"
+output: pdf_document
+date: "November 2023"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(labelled)
+library(dplyr)
+library(kableExtra)
+library(knitr)
+library(mice)
+library(ggplot2)
+library(gtsummary)
+library(naniar)
+library(mice)
+library(glmnet)
+library(lme4)
+library(MASS)
+library(pROC)
+library(boot)
+library(caret)
+```
+
+
+```{r}
+read.csv("project2.csv")
+df <- read.csv("project2.csv")
+```
+
+```{r}
+
+############# Data Pre-Processing #############
+
+### See the data structure
+head(df)
+str(df)
+summary(df)
+```
+
+```{r}
+df <- set_variable_labels(df,
+  record_id = "Patient ID",
+  center = "Medical Center",
+  mat_ethn = "Maternal Ethnicity",
+  bw = "Birth weight",
+  ga = "Birth Gestational age",
+  blength = "Birth length",
+  birth_hc = "Birth head circumference",
+  del_method = "Delivery Method",
+  prenat_ster = "Prenatal Corticosteroids",
+  com_prenat_ster = "Complete Prenatal Steroids",
+  mat_chorio = "Maternal Chorioamnionitis",
+  gender = "Gender",
+  sga = "Small for GA",
+  any_surf = "Surfactant in first 72h",
+  weight_today.36 = "36 week weight",
+  ventilation_support_level.36 = "36 weeks ventilation support",
+  inspired_oxygen.36 = "36 weeks FiO2",
+  p_delta.36 = "36 weeks PIP",
+  peep_cm_h2o_modified.36 = "36 weeks PEEP",
+  med_ph.36 = "36 weeks Meds for PH",
+  weight_today.44 = "44 weeks weight",
+  ventilation_support_level_modified.44 = "44 weeks ventilation support",
+  inspired_oxygen.44 = "44 weeks FiO2",
+  p_delta.44 = "44 weeks PIP",
+  peep_cm_h2o_modified.44 = "44 weeks PEEP",
+  med_ph.44 = "44 weeks Meds for PH",
+  hosp_dc_ga = "Hospital Discharge GA",
+  Trach = "Tracheostomy",
+  Death = "Death"
+)
+
+###Retrieve variable labels
+variable_labels <- sapply(names(df), function(x) var_label(df[[x]]))
+
+only_labels <- unname(variable_labels)
+
+```
+
+
+```{r}
+### Finding duplicates 
+duplicates <- duplicated(df)
+num_duplicates <- sum(duplicates)
+
+### Removing duplicates
+df <- df[!duplicates, ]
+
+### Removing mat_race variable
+df <- df[, !names(df) == "mat_race"]
+
+```
+
+
+```{r}
+### check Medical Center variable ( Max.:21.00 ?)
+df$center
+unique(df$center)
+
+### change 21 to 2
+df$center[df$center == 21] <- 20
+
+### Replace NA values in 'center' with 1
+df$center[is.na(df$center)] <- 1
+
+```
+
+
+```{r}
+############# Outcome of interest #############
+
+### Basic summary of Trach and Death
+summary(df$Trach)
+summary(df$Death)
+
+### Explore the relationship between Trach and Death
+table(df$Trach, df$Death)
+
+### Isolating rows where 'Death' is missing
+missing_death_cases <- df[is.na(df$Death), ]
+missing_death_cases
+
+### Deleting rows where 'Death' is missing
+df <- df[!is.na(df$Death), ]  
+
+### Create a composite outcome variable
+df$trach_death <- as.integer(df$Trach == 1 | df$Death == 'Yes')
+
+### Label a new trach_death cariable
+var_label(df$trach_death) <- "Trach/Death"
+
+df$trach_death
+
+# Calculate the percentage distribution
+percentage_distribution <- prop.table(table(df$trach_death)) * 100
+
+
+# Create a bar plot
+ggplot() +
+  geom_col(data = as.data.frame(percentage_distribution), aes(x = factor(Var1), y = Freq), fill = "Gray", color = "black") +
+  theme_minimal() +
+  ggtitle("Distribution of Composite Outcome") +
+  xlab("Trachoestomy or Death") +
+  ylab("Percentage")
+
+```
+
+
+```{r}
+############# Descriptive statistics #############
+
+### Descriptive statistics for continuous variables
+continuous_vars <- c('bw', 'ga', 'blength', 'weight_today.36', 'inspired_oxygen.36', 
+                     'p_delta.36', 'peep_cm_h2o_modified.36', 'weight_today.44', 
+                     'inspired_oxygen.44', 'p_delta.44', 'peep_cm_h2o_modified.44', 
+                     'hosp_dc_ga')
+continuous_var_names <- names(df)[continuous_vars]
+df_continuous <- df[, continuous_vars]
+
+summary(df_continuous)
+
+### Histograms for  continuous variables
+hist(df$bw)
+hist(df$ga)
+hist(df$blength)
+hist(df$birth_hc)
+hist(df$weight_today.36)
+hist(df$inspired_oxygen.36)
+hist(df$p_delta.36)
+hist(df$peep_cm_h2o_modified.36)
+hist(df$weight_today.44)
+hist(df$inspired_oxygen.44)
+hist(df$p_delta.44)
+hist(df$peep_cm_h2o_modified.44)
+hist(df$hosp_dc_ga[df$hosp_dc_ga <= 100])
+
+```
+
+
+```{r}
+### Descriptive statistics for categorical variables
+
+### Categorical variables vector
+categorical_vars <- c('center', 'mat_race', 'mat_ethn', 'del_method', 'prenat_ster', 'com_prenat_ster', 'mat_chorio', 'gender', 'sga', 'any_surf', 'ventilation_support_level.36', 'med_ph.36', 'ventilation_support_level_modified.44', 'med_ph.44')
+
+
+### Convert ventilation_support_level variables to factors
+ventilation_levels <- c("No support", "Non-invasive pressure", "Invasive pressure")
+
+df$ventilation_support_level.36 <- factor(df$ventilation_support_level.36, 
+                                          levels = 0:2, 
+                                          labels = ventilation_levels)
+
+df$ventilation_support_level_modified.44 <- factor(df$ventilation_support_level_modified.44, 
+                                                   levels = 0:2, 
+                                                   labels = ventilation_levels)
+
+### Convert 'med_ph.36' and 'med_ph.44' to yes/no factors
+med_ph_labels <- c("No", "Yes")
+
+df$`med_ph.36` <- factor(ifelse(df$`med_ph.36` == 1, "Yes", "No"),
+                         levels = med_ph_labels)
+
+df$`med_ph.44` <- factor(ifelse(df$`med_ph.44` == 1, "Yes", "No"),
+                         levels = med_ph_labels)
+
+### Add levels to the 'mat_ethn' variable
+df$mat_ethn <- factor(df$mat_ethn, levels = c(1, 2), labels = c("Hispanic or Latino", "Not Hispanic or Latino"))
+
+### Add levels to the 'del_method' variable
+df$del_method <- factor(df$del_method, levels = c(1, 2), labels = c("Vaginal delivery", "Cesarean section"))
+
+### Add levels to the 'Trach' variable
+df$Trach <- factor(df$Trach, levels = c(0, 1), labels = c("No", "Yes"))
+
+### Convert categorical variables to factors
+for (col in categorical_vars) {
+  if (!all(is.na(df[[col]]) | df[[col]] == "")) {
+    df[[col]] <- as.factor(df[[col]])
+  }
+}
+
+````
+
+
+```{r}
+### Calculate the correlation matrix
+
+### Calculate the matrix
+cor_matrix <- cor(df[, c('bw', 'ga', 'blength', 'birth_hc', 'weight_today.36', 
+                         'inspired_oxygen.36', 'p_delta.36', 'peep_cm_h2o_modified.36', 
+                         'weight_today.44', 'inspired_oxygen.44', 
+                         'p_delta.44', 'peep_cm_h2o_modified.44')], 
+                  use = "complete.obs",
+                  )
+
+### Define the color palette
+col <- colorRampPalette(c("#6D9EC1", "#FFFFFF", "#E46726"))(200) 
+
+### Create the correlation plot 
+corrplot::corrplot(cor_matrix, method = "color", col = col, tl.pos = "lt", tl.cex = 0.7, 
+         tl.col = "black", tl.srt = 45, order = "hclust", 
+         tl.labels = variable_labels, type = "upper", 
+         addCoef.col = "black", number.cex = 0.5)
+
+
+```
+
+
+
+```{r}
+### summary table
+
+### Set labels
+df <- set_variable_labels(df,
+  record_id = "Patient ID",
+  center = "Medical Center",
+  mat_ethn = "Maternal Ethnicity",
+  bw = "Birth weight",
+  ga = "Birth Gestational age",
+  blength = "Birth length",
+  birth_hc = "Birth head circumference",
+  del_method = "Delivery Method",
+  prenat_ster = "Prenatal Corticosteroids",
+  com_prenat_ster = "Complete Prenatal Steroids",
+  mat_chorio = "Maternal Chorioamnionitis",
+  gender = "Gender",
+  sga = "Small for GA",
+  any_surf = "Surfactant in first 72h",
+  weight_today.36 = "36 week weight",
+  ventilation_support_level.36 = "36 weeks ventilation support",
+  inspired_oxygen.36 = "36 weeks FiO2",
+  p_delta.36 = "36 weeks PIP",
+  peep_cm_h2o_modified.36 = "36 weeks PEEP",
+  med_ph.36 = "36 weeks Meds for PH",
+  weight_today.44 = "44 weeks weight",
+  ventilation_support_level_modified.44 = "44 weeks ventilation support",
+  inspired_oxygen.44 = "44 weeks FiO2",
+  p_delta.44 = "44 weeks PIP",
+  peep_cm_h2o_modified.44 = "44 weeks PEEP",
+  med_ph.44 = "44 weeks Meds for PH",
+  hosp_dc_ga = "Hospital Discharge GA",
+  Trach = "Tracheostomy",
+  Death = "Death"
+)
+
+### Retrieve variable labels
+variable_labels <- sapply(names(df), function(x) var_label(df[[x]]))
+
+only_labels <- unname(variable_labels)
+
+### convert trach_death to a factor
+df$trach_death <- factor(df$trach_death, levels = c(0, 1), labels = c("No", "Yes"))
+
+###Create a table
+table1 <- df %>%
+  tbl_summary(
+    by = trach_death,
+    include = - record_id,
+    type = list(
+      all_continuous() ~ "continuous",  # This will give mean (SD) for continuous variables
+      all_categorical() ~ "categorical" # This will give n (%) for categorical variables
+    ),
+    statistic = list(
+      all_continuous() ~ "{mean} ({sd})", # Format for continuous variables
+      all_categorical() ~ "{n} ({p}%)"    # Format for categorical variables
+    ),
+    missing = "no" # Exclude missing data from the summary statistics
+  ) %>%
+  add_n() %>%
+  bold_labels()
+
+
+table1
+
+```
+
+
+
+```{r}
+### Total missing values in the dataset
+print(sum(is.na(df)) / (nrow(df) * ncol(df)) * 100)
+
+### Missing values in the columns
+print(colMeans(is.na(df)) * 100)
+summary(colMeans(is.na(df)) * 100)
+
+### Missing values in the rows
+print(rowMeans(is.na(df)) * 100)
+summary(rowMeans(is.na(df)) * 100)
+
+# Visualize missing data
+
+miss_var_summary(df)
+
+gg_miss_var(df)
+
+gg_miss_upset(df)
+
+
+```
+
+
+```{r}
+### remove variables that are not used for further analysis 
+df_2 <- df[, !(names(df) %in% c("record_id", "mat_race", "ga", "blength", "birth_hc", "com_prenat_ster", "hosp_dc_ga", "Trach", "Death"))]
+
+gg_miss_var(df_2)
+
+```
+
+
+```{r}
+############ Multiple imputation ##################
+
+# Set the number of imputations
+m <- 5
+
+df_2_mice <- mice(df_2, 5, pri=F)
+
+# Store each imputed data set
+df_2_imp <- vector("list",5)
+for (i in 1:5){
+  df_2_imp[[i]] <- mice::complete(df_2_mice,i) 
+}
+# df_2_imp[[1]] # Example of accessing first imputed dataset
+
+df_3 <- df_2_imp[[1]]
+```
+
+
+```{r}
+############ Creating subsets for 3 models #################
+
+# Model 1: All Variables
+#df_3
+
+# Model 2: 36-Week Variables
+variables_36_weeks <- c("center", "mat_ethn", "bw", "del_method", "prenat_ster", 
+                        "mat_chorio", "gender", "sga", "any_surf", "weight_today.36", 
+                        "ventilation_support_level.36", "inspired_oxygen.36", "p_delta.36", 
+                        "peep_cm_h2o_modified.36", "med_ph.36", "trach_death")
+df_36_weeks <- df_3[variables_36_weeks]
+
+# Model 3: 44-Week Variables
+variables_44_weeks <- c("center", "mat_ethn", "bw", "del_method", "prenat_ster", 
+                        "mat_chorio", "gender", "sga", "any_surf", "weight_today.44", 
+                        "ventilation_support_level_modified.44", "inspired_oxygen.44", "p_delta.44", 
+                        "peep_cm_h2o_modified.44", "med_ph.44", "trach_death")
+df_44_weeks <- df_3[variables_44_weeks]
+```
+
+
+```{r}
+######  Fit LASSO models for variable selection #####
+# Split data into training and validation sets
+set.seed(1)  # For reproducibility
+trainIndex <- createDataPartition(df_3$trach_death, p = .8, list = FALSE, times = 1)
+
+df_train <- df_3[trainIndex, ]
+df_valid <- df_3[-trainIndex, ]
+
+### Fit LASSO models and validate for variable selection ###
+
+# Function to fit LASSO and validate
+fit_validate_lasso <- function(df_train, df_valid, outcome_var, model_name) {
+    predictors <- colnames(df_train)[!colnames(df_train) %in% c(outcome_var, "center")]
+    
+    # Create model matrices for training and validation datasets
+    X_train <- model.matrix(reformulate(termlabels = predictors, response = outcome_var), data = df_train)[,-1]
+    Y_train <- df_train[[outcome_var]]
+
+    X_valid <- model.matrix(reformulate(termlabels = predictors, response = outcome_var), data = df_valid)[,-1]
+    Y_valid <- df_valid[[outcome_var]]
+    
+    # Convert factor variables to numeric using one-hot encoding
+    X_train <- model.matrix(~., data = df_train[, predictors])
+    X_valid <- model.matrix(~., data = df_valid[, predictors])
+
+    # Fit LASSO model on training data
+    cv_lasso <- cv.glmnet(X_train, Y_train, alpha = 1, family = "binomial")
+    best_lambda <- cv_lasso$lambda.min
+    lasso_model <- glmnet(X_train, Y_train, alpha = 1, lambda = best_lambda, family = "binomial")
+
+    # Validate model on validation data
+    predictions <- predict(lasso_model, newx = X_valid, s = best_lambda, type = "response")
+    auc <- pROC::auc(pROC::roc(Y_valid, predictions))
+    cat("AUC for", model_name, ":", auc, "\n")
+
+    # Output selected variables
+    lasso_coefficients <- coef(lasso_model, s = best_lambda)
+    selected_vars <- rownames(lasso_coefficients)[lasso_coefficients[, 1] != 0]
+    cat("Selected variables for", model_name, ":", paste(selected_vars, collapse = ", "), "\n")
+
+    # Output coefficients for all variables
+    lasso_coefficients <- coef(lasso_model, s = best_lambda)
+    cat("Coefficients for", model_name, ":\n")
+    print(lasso_coefficients)
+}
+
+
+# Call the function for each model type with modified model names
+fit_validate_lasso(df_train, df_valid, "trach_death", "Model_1_All_Variables")
+fit_validate_lasso(df_train[variables_36_weeks], df_valid[variables_36_weeks], "trach_death", "Model_2_36_Week_Variables")
+fit_validate_lasso(df_train[variables_44_weeks], df_valid[variables_44_weeks], "trach_death", "Model_3_44_Week_Variables")
+
+
+```
+
+
+```{r}
+# Define a function to fit a Mixed-Effects Model
+fit_mixed_effects_model <- function(df, fixed_effects, random_effect = "center") {
+    formula <- as.formula(paste("trach_death ~", paste(fixed_effects, collapse = " + "), "+ (1 |", random_effect, ")"))
+    model <- glmer(formula, data = df, family = binomial())
+    return(model)
+}
+
+# Variables selected from LASSO for each model
+
+selected_vars_model_1 <- c("mat_ethn", "del_method", "prenat_ster", "mat_chorio", "ventilation_support_level.36", "inspired_oxygen.36",
+"ventilation_support_level_modified.44", "peep_cm_h2o_modified.44", "med_ph.44")
+
+selected_vars_model_2 <- c("mat_ethn", "prenat_ster", "mat_chorio", "sga", 
+"ventilation_support_level.36", "inspired_oxygen.36", "med_ph.36")
+
+selected_vars_model_3 <- c("mat_ethn", "del_method", "prenat_ster", "gender", "sga", "any_surf", 
+"ventilation_support_level_modified.44", "inspired_oxygen.44",  "peep_cm_h2o_modified.44", "med_ph.44")
+
+# Standardize numeric variables
+df_3_standardized <- df_3
+numeric_vars <- sapply(df_3, is.numeric)
+df_3_standardized[, numeric_vars] <- scale(df_3[, numeric_vars])
+
+# Fit Mixed-Effects Models
+model_all_mixed <- fit_mixed_effects_model(df_3_standardized, selected_vars_model_1)
+model_36_weeks_mixed <- fit_mixed_effects_model(df_3_standardized, selected_vars_model_2)
+model_44_weeks_mixed <- fit_mixed_effects_model(df_3_standardized, selected_vars_model_3)
+
+# Summarize the models
+summary(model_all_mixed)
+summary(model_36_weeks_mixed)
+summary(model_44_weeks_mixed)
+
+```
+
+
+
+```{r}
+### Model Performance
+
+# Modified function to calculate metrics
+calculate_metrics <- function(model, df_valid) {
+  # Convert 'trach_death' to numeric based on factor levels
+  actual_class <- as.numeric(df_valid$trach_death) - 1  # Adjust this based on your factor levels
+
+  # Predict probabilities
+  predictions <- predict(model, newdata = df_valid, type = "response")
+  
+  # Convert probabilities to binary classification (threshold = 0.5)
+  predicted_class <- ifelse(predictions > 0.5, 1, 0)
+  
+  # Create a contingency table
+  confusion_matrix <- table(Predicted = predicted_class, Actual = actual_class)
+  
+  # Ensure all elements exist in the confusion matrix
+  if(!all(c(0, 1) %in% rownames(confusion_matrix))) {
+    confusion_matrix <- addmargins(confusion_matrix)
+  }
+
+  # Initialize metrics
+  sensitivity <- specificity <- precision <- f1_score <- NA
+
+  # Calculate metrics if possible
+  if(!is.na(confusion_matrix[2, 2]) && !is.na(confusion_matrix[1, 1])) {
+    sensitivity <- confusion_matrix[2, 2] / sum(confusion_matrix[2, ])
+    specificity <- confusion_matrix[1, 1] / sum(confusion_matrix[1, ])
+    
+    precision <- confusion_matrix[2, 2] / sum(confusion_matrix[, 2])
+    f1_score <- if (precision + sensitivity > 0) {
+      2 * (precision * sensitivity) / (precision + sensitivity)
+    } else {
+      NA
+    }
+  }
+
+  # Brier Score
+  brier_score <- mean((predictions - actual_class)^2)
+  
+  # Return the metrics
+  list(Sensitivity = sensitivity, Specificity = specificity, F1_Score = f1_score, Brier_Score = brier_score)
+}
+
+# Calculate metrics for each model
+metrics_model_1 <- calculate_metrics(model_all_mixed, df_valid)
+metrics_model_2 <- calculate_metrics(model_36_weeks_mixed, df_valid)
+metrics_model_3 <- calculate_metrics(model_44_weeks_mixed, df_valid)
+
+# Print the metrics
+print(metrics_model_1)
+print(metrics_model_2)
+print(metrics_model_3)
+
+
+```
+
+
+```{r}
+### Update #####
+
+
+
+
+```
+
+
+
+```{r}
+# Create a data frame with the metrics
+metrics_df <- data.frame(
+  Model = c("Model 1 (All Variables)", "Model 2 (36 Week Variables)", "Model 3 (44 Week Variables)"),
+  Sensitivity = c(metrics_model_1$Sensitivity, metrics_model_2$Sensitivity, metrics_model_3$Sensitivity),
+  Specificity = c(metrics_model_1$Specificity, metrics_model_2$Specificity, metrics_model_3$Specificity),
+  F1_Score = c(metrics_model_1$F1_Score, metrics_model_2$F1_Score, metrics_model_3$F1_Score),
+  Brier_Score = c(metrics_model_1$Brier_Score, metrics_model_2$Brier_Score, metrics_model_3$Brier_Score)
+)
+
+# Create a table with kable
+kable(metrics_df, caption = "Performance Metrics for Three Models", format = "markdown")
+```
+
+
+```{r}
+# Calculate ROC curves and AUC for each model
+roc_model_1 <- roc(df_valid$trach_death, predict(model_all_mixed, newdata = df_valid, type = "response"))
+roc_model_2 <- roc(df_valid$trach_death, predict(model_36_weeks_mixed, newdata = df_valid, type = "response"))
+roc_model_3 <- roc(df_valid$trach_death, predict(model_44_weeks_mixed, newdata = df_valid, type = "response"))
+
+# Plot ROC curves
+plot(roc_model_1, col = "blue", main = "ROC Curves for Three Models")
+lines(roc_model_2, col = "red")
+lines(roc_model_3, col = "green")
+
+# Add a legend
+legend("right", legend = c("Model 1", "Model 2", "Model 3"), col = c("blue", "red", "green"), lty = 1)
+
+# Calculate and print AUC values
+auc_model_1 <- auc(roc_model_1)
+auc_model_2 <- auc(roc_model_2)
+auc_model_3 <- auc(roc_model_3)
+
+cat("AUC for Model 1:", auc_model_1, "\n")
+cat("AUC for Model 2:", auc_model_2, "\n")
+cat("AUC for Model 3:", auc_model_3, "\n")
+
+```
+

@@ -1,0 +1,1677 @@
+---
+title: "Project 1_Exploratory Data Analysis"
+output:
+  word_document: default
+  pdf_document: default
+date: "2023-10-10"
+---
+
+```{r include = FALSE}
+knitr::opts_chunk$set(echo=FALSE)
+```
+
+```{r include = FALSE}
+# load packages
+library(dplyr)
+library(skimr)
+library(tidyverse)
+library(naniar)
+library(visdat)
+library(gtsummary)
+library(ggplot2)
+library(gridExtra)
+library(lmtest)
+library(stargazer)
+library(knitr)
+library(kableExtra)
+library(labelled)
+
+# read the dataset
+project1_data <- read.csv("project1.csv")
+View(project1_data)
+```
+
+The primary objective of Project 1 is to investigate the effects of Smoking During Pregnancy (SDP) and Environmental Tobacco Smoke (ETS) exposure on adolescent self-regulation, substance use, and externalizing behavior. This exploratory data analysis (EDA) aims to gain insights into the dataset and prepare it for further analysis.
+
+### Data Inspection
+
+To ensure data accuracy and consistency, I conducted initial data checks and preprocessing steps:
+
+-   Checked for data import correctness and formatting inconsistencies.Replaced values in specific variables for consistency.
+
+-   Renamed variables for alignment between the dataset and codebook.
+
+-   Addressed missing values in relevant variables.
+
+The dataset comprises 49 observations and a total of 78 variables. These variables encompass a range of data types, including both continuous and categorical variables. Additionally, I encountered a few character-based variables within the dataset. For variables with binary responses ("1=Yes" and "2=No"), we transformed these values into numeric format: "1=Yes" became 1; "2=No" became 2; Blank entries were replaced with NA (missing values). Variables included **mom_smoke_16wk**, **mom_smoke_22wk**, **mom_smoke_32wk**, **mom_smoke_pp1**, **mom_smoke_pp2**, **mom_smoke_pp12wk**, **mom_smoke_pp6mo**.
+
+In the variable "**mom_numcig**," which originally exhibited diverse numeric representations, I applied the following transformations:
+
+-   "2 black and miles a day" was harmonized to 2
+
+-   "44989" was transformed into NA
+
+-   "20-25" was adjusted to 22 for consistency
+
+-   "None" was converted to 0
+
+-   Blank entries were standardized to NA.
+
+To ensure clarity and consistency, I harmonized the variable names that were inconsistent between the dataset and the accompanying codebook. Specifically:
+
+-   "paiain" was renamed to "**paian**"
+
+-   "taiain" was aligned to "**taian**"
+
+-   "nidaalc" was adjusted to "**nidalc**."
+
+In the "income" variable, I converted "250,000" to 250000 and replaced blank entries with NA to denote missing income information.
+
+```{r}
+#Change variables to factors and recode their levels
+factors <- c("psex", "employ", "pedu", "tsex", "childasd")
+project1_data[,factors] <- lapply(factors, function(x){project1_data[,x] <- as.factor(project1_data[,x])})
+
+project1_data$psex <- fct_recode(project1_data$psex, 
+                      "Male" = "0", 
+                      "Female" = "1")
+project1_data$employ <- fct_recode(project1_data$employ, 
+                        "No" = "0", 
+                        "Part-Time" = "1", 
+                        "Full-Time" = "2")
+project1_data$pedu <- fct_recode(project1_data$pedu, 
+                      "Some High School" = "0", 
+                      "High School" = "1",
+                      "GED" = "2",
+                      "Some College" = "3",
+                      "2 Year Degree" = "4",
+                      "4 Year Degree" = "5",
+                      "Postgraduate Degree" = "6")
+project1_data$tsex <- fct_recode(project1_data$tsex, 
+                      "Male" = "0", 
+                      "Female" = "1")
+project1_data$childasd <- fct_recode(project1_data$childasd,
+                          "No" = "0",
+                          "Diagnosed" = "1",
+                          "Suspected" = "2")
+
+#Convert "Prefer Not to Say" to NA
+project1_data$tethnic[project1_data$tethnic == 2] <- NA
+
+#Create variable labels
+var_label(project1_data) <- list(
+  parent_id = "Parent ID",
+  page = "Parent Age",
+  psex = "Parent Sex",
+  plang = "Another Language Spoken by Parent at Home",
+  pethnic = "Parent Hispanic/Latino",
+  paian = "Parent American Indian/Alaskan Native",
+  pasian = "Parent Asian",
+  pnhpi = "Parent Native Hawaiian or Pacific Islander",
+  pblack = "Parent Black",
+  pwhite = "Parent White",
+  prace_other = "Parent Other Race",
+  employ = "Parent Employed",
+  pedu = "Highest Level of Education of Parent",
+  income = "Estimated Annual Household Income",
+  childasd = "ASD in Child",
+  nidalc = "Parent Alcohol Use in the Past 6 Months",
+  nidatob = "Parent Tobacco Product Use in the Past 6 Months",
+  nidapres = "Parent Prescription Drug Use for Non-Medical Reasons in the Past 6 Months",
+  nidaill = "Parent Illegal Drug Use in the Past 6 Months",
+  momcig = "Number of Days Parent Smoked in the Past 30 Days",
+  mom_numcig = "Cigarettes Smoked per Day by Parent",
+  mom_smoke_16wk = "Parent Smoker at 16 Weeks Pregnant",
+  mom_smoke_22wk = "Parent Smoker at 22 Weeks Pregnant",
+  mom_smoke_32wk = "Parent Smoker at 32 Weeks Pregnant",
+  mom_smoke_pp1 = "Parent Smoker at First Postpartum Visit",
+  mom_smoke_pp2 = "Parent Smoker at Second Postpartum Visit",
+  mom_smoke_pp12wk = "Parent Smoker at 12 Weeks Postpartum", 
+  mom_smoke_pp6mo = "Parent Smoker at 6 Months Postpartum", 
+  cotimean_34wk = "Urine Cotinine at 34 Weeks Gestation",
+  cotimean_pp6mo_baby = "Urine Cotinine at 6 Months Postpartum (Baby)", 
+  cotimean_pp6mo = "Urine Cotinine at 6 Months Postpartum (Parent)",
+  swan_inattentive = "Child Likely ADHD - Inattentive",
+  swan_hyperactive = "Child Likely ADHD - Hyperactive/Impulsive",
+  bpm_att_p = "Parent-Reported Attention Problems Score (BPM)",
+  bpm_ext_p = "Parent-Reported Externalizing Problems Score (BPM)",
+  bpm_int_p = "Parent-Reported Internalizing Problems Score (BPM)",
+  smoke_exposure_6mo = "Smoke-Exposed Between 0 to 6 Months",
+  smoke_exposure_12mo = "Smoke-Exposed Between 7 to 12 Months",
+  smoke_exposure_2yr = "Smoke-Exposed in 2nd Year",
+  smoke_exposure_3yr = "Smoke-Exposed in 3rd Year",
+  smoke_exposure_4yr = "Smoke-Exposed in 4th Year",
+  smoke_exposure_5yr = "Smoke-Exposed in 5th Year",
+  ppmq_parental_knowledge = "Parent-Reported Average Response on Parental Knowledge (PKQ)",
+  ppmq_child_disclosure = "Parent-Reported Average Response on Child Disclosure (PKQ)",
+  ppmq_parental_solicitation = "Parent-Reported Average Response on Parental Solicitation (PKQ)",
+  ppmq_parental_control = "Parent-Reported Average Response on Parental Control (PKQ)",
+  bpm_att_a = "Self-Reported Attention Score for Parent (BPM)",
+  bpm_ext_a = "Self-Reported Externalizing Problems Score for Parent (BPM)",
+  bpm_int_a = "Self-Reported Internalizing Problems Score for Parent (BPM)",
+  erq_cog_a = "Self-Reported Average Cognitive Reappraisal Score for Parent (ERQ)",
+  erq_exp_a = "Self-Reported Average Expressive Suppression Score for Parent (ERQ)",
+  tage = "Child Age",
+  tsex = "Child Sex",
+  language = "Another Language Spoken by Child at Home",
+  tethnic = "Child Hispanic/Latino",
+  taian = "Child American Indian/Alaskan Native",
+  tasian = "Child Asian",
+  tnhpi = "Child Native Hawaiian or Pacific Islander",
+  tblack = "Child Black",
+  twhite = "Child White",
+  trace_other = "Child Other Race",
+  cig_ever = "Cigarette Smoked Ever",
+  num_cigs_30 = "Cigarette Use Over Past 30 Days (Child)",
+  e_cig_ever = "E-Cigarette or Vape Used Ever",
+  num_e_cigs_30 = "E-Cigarette or Vape Use Over Past 30 Days (Child)",
+  mj_ever = "Marijuana Used Ever",
+  num_mj_30 = "Marijuana Use Over Past 30 Days (Child)",
+  alc_ever = "Alcohol Ever Consumed by Child (Not as Part of Religious Ceremonies)",
+  num_alc_30 = "Alcohol Consumption Over Past 30 Days (Child)",
+  bpm_att = "Self-Reported Attention Problems Score (BPM)",
+  bpm_ext = "Self-Reported Externalizing Problems Score (BPM)",
+  bpm_int = "Self-Reported Internalizing Problems Score (BPM)",
+  erq_cog = "Average Cognitive Reappraisal Score of Child (ERQ)",
+  erq_exp = "Average Expressive Suppression Score of Child (ERQ)",
+  pmq_parental_knowledge = "Child-Reported Average Response on Parental Knowledge (PKQ)",
+  pmq_child_disclosure = "Child-Reported Average Response on Child Disclosure (PKQ)",
+  pmq_parental_solicitation = "Child-Reported Average Response on Parental Solicitation (PKQ)",
+  pmq_parental_control = "Child-Reported Average Response on Parental Control (PKQ)"
+)
+```
+
+### Missing values
+
+Approximately 23% of the dataset contains missing values. Four variables, namely **um_cigs_30**, **num_e_cigs_30**, **num_mj_30**, and **num_alc_30**, contain more than 90% missing values. These variables are related to follow-up questions that do not require an answer if the response to a previous question was "No." Variables mom_spoke_pp1 and mom_spoke_pp2 exhibit 80% and 40% missing values, respectively. These variables represent self-reported current smoker status at the 1st and 2nd postpartum visits. Notably, no participant has observations in both of these variables; it is either one or the other. Furthermore, some participants do not have observations in either of these variables. The variable **childasd**, which pertains to Autism in the child, has 57% missing values. All other variables have 32% or less missing values.
+
+There are eight observations in which 49% or more of the values are missing. Importantly, these eight observations also have missing values in the answers that serve as our dependent variables. Due to the lack of sufficient information in these cases, I decided to exclude them from further analysis.
+
+```{r}
+# filter out cases with NA in the dependenr variables
+exclude_rows <- c(16, 43, 45, 5, 38, 46, 12, 22)
+keep_rows <- setdiff(1:nrow(project1_data), exclude_rows)
+
+filtered_data <- project1_data[keep_rows, ]
+```
+
+```{r}
+
+### missing data summary
+
+miss_var_summary(project1_data)
+gg_miss_var(project1_data)
+```
+
+### Socio-demographic characteristics of participants
+
+The age range of parents in the dataset spans from 32 to 45 years, while the children's ages range from 12 to 16 years. It's important to note that all participants in the dataset are females except one person. Additionally, there are no individuals of Black or Asian race in the dataset among parents. A majority of parents (62%) identify themselves as White, while only 46% of children self-identify as White. Moreover, 37% of children identify themselves as Black.
+
+```{r}
+#### Demographics
+var_label(project1_data) <- list(
+  pethnic = "Hispanic/Latino",
+  paian = "American Indian/Alaskan Native",
+  pasian = "Asian",
+  pnhpi = "Native Hawaiian or Pacific Islander",
+  pblack = "Black",
+  pwhite = "White",
+  prace_other = "Other Race",
+  tethnic = "Hispanic/Latino",
+  taian = "American Indian/Alaskan Native",
+  tasian = "Asian",
+  tnhpi = "Native Hawaiian or Pacific Islander",
+  tblack = "Black",
+  twhite = "White",
+  trace_other = "Other Race"
+)
+
+# parent demographics summary table
+parent_dems <- c("page", "psex", "plang", "employ", "pedu", "income")
+par_race_vars <- c("pethnic", "paian", "pasian", "pnhpi", "pblack", "pwhite", "prace_other")
+
+theme_gtsummary_compact(set_theme=TRUE, font_size = 10)
+
+# Select the variables you want to include in the table
+selected_vars <- c(par_race_vars, parent_dems)
+
+# Create a summary table
+summary_table <- project1_data %>%
+  select(all_of(selected_vars)) %>%
+  tbl_summary(missing = "no") %>%
+  modify_table_styling(
+    label = list(all_of(par_race_vars) ~ "Parent Race", all_of(parent_dems) ~ "Parent Demographics")
+  )
+
+# Display the summary table
+summary_table
+
+
+```
+
+### Calculating Prenatal Exposure Severity Variable (Smoking During Pregnancy - SDP)
+
+To calculate the variable representing smoking during pregnancy (SDP), I used following variables from the dataset:
+
+-   **`mom_smoke_16wk`**, **`mom_smoke_22wk`**, and **`mom_smoke_32wk`** (to determine if the mother smoked during specific time periods).
+
+-   **`cotimean_34wk`** (to assess the severity of smoking during pregnancy).
+
+I did not use the variables **`momcig`** and **`mom_numcig`** because it was unclear to which time period they referred.
+
+Before performing this calculation, I needed to address missing values in the variables **`mom_smoke_16wk`**, **`mom_smoke_22wk`**, and **`mom_smoke_32wk`**. To do this, I examined the distribution of responses in these variables.
+
+```{r}
+# view the answers distribution for mom_smoke variables
+# Prepare data: convert columns to character, replace NAs, and gather data into long format
+  long_data <- filtered_data %>%
+    mutate_at(vars(mom_smoke_16wk, mom_smoke_22wk, mom_smoke_32wk, mom_smoke_pp12wk, mom_smoke_pp6mo), 
+              ~replace(., . == 1, "Yes")) %>%
+    mutate_at(vars(mom_smoke_16wk, mom_smoke_22wk, mom_smoke_32wk, mom_smoke_pp12wk, mom_smoke_pp6mo), 
+              ~replace(., . == 2, "No")) %>%
+    replace_na(list(mom_smoke_16wk = "Missing", mom_smoke_22wk = "Missing", mom_smoke_32wk = "Missing", 
+                    mom_smoke_pp12wk = "Missing", mom_smoke_pp6mo = "Missing")) %>%
+    gather(variable, value, mom_smoke_16wk, mom_smoke_22wk, mom_smoke_32wk, mom_smoke_pp12wk, mom_smoke_pp6mo)
+  
+# create the plots
+  plots <- lapply(unique(long_data$variable), function(var_name) {
+    ggplot(subset(long_data, variable == var_name), aes(x=value)) +
+      geom_bar(fill="gray", color="black", alpha=0.7) +
+      labs(title=paste("Distribution"), x=var_name, y="Count") +
+      theme_minimal()
+  })
+  
+# arrange and display the plots
+  do.call(grid.arrange, c(plots, ncol=5))
+```
+
+Upon visual inspection, it became evident that "No" was the most frequent response. Therefore, I decided to replace the missing values with "No," under the assumption that these missing values indicated that the participant did not smoke during those specific time periods.
+
+```{r}
+# calculate smoking during pregnancy (SDP)
+  
+# check NAs
+  na_counts <- sapply(filtered_data[, c("mom_smoke_16wk", "mom_smoke_22wk", "mom_smoke_32wk")], function(x) sum(is.na(x)))
+  na_counts
+  
+  filtered_data %>%
+    select(mom_smoke_pp1, mom_smoke_pp2)
+  
+# replace NAs with 2 ("No") in mom_smoke_16wk, mom_smoke_22wk, mom_smoke_32wk
+  filtered_data <- filtered_data %>%
+    mutate(
+      mom_smoke_16wk = ifelse(is.na(mom_smoke_16wk), 2, mom_smoke_16wk),
+      mom_smoke_22wk = ifelse(is.na(mom_smoke_22wk), 2, mom_smoke_22wk),
+      mom_smoke_32wk = ifelse(is.na(mom_smoke_32wk), 2, mom_smoke_32wk)
+    )
+  na_counts <- sapply(filtered_data[, c("mom_smoke_16wk", "mom_smoke_22wk", "mom_smoke_32wk")], function(x) sum(is.na(x)))
+
+```
+
+To calculate SDP, I created two new variables:
+
+1.  **`smoking_status_prenatal`** - based on **`mom_smoke_16wk`**, **`mom_smoke_22wk`**, and **`mom_smoke_32wk`**.
+
+    ```{r}
+    # calculate smoking_status_prenatal based on mom_smoke_16wk, mom_smoke_22wk, mom_smoke_32wk
+      filtered_data <- filtered_data %>%
+        mutate(
+          smoking_status_prenatal = case_when(
+            mom_smoke_16wk == 1 & mom_smoke_22wk == 1 & mom_smoke_32wk == 1 ~ "Consistent Smoker",
+            mom_smoke_16wk == 2 & mom_smoke_22wk == 2 & mom_smoke_32wk == 2 ~ "Non-Smoker",
+            (mom_smoke_16wk == 1 | mom_smoke_22wk == 1 | mom_smoke_32wk == 1) ~ "Inconsistent Smoker"
+          )
+        )
+    ```
+
+2.  **`smoking_severity_prenatal`** - based on **`cotimean_34wk`**.
+
+    ```{r}
+    # calculate smoking_severity_prenatal based on cotimean_34wk
+      
+    # check NAs
+      na_counts <- sapply(filtered_data[, c("cotimean_34wk")], function(x) sum(is.na(x)))
+      
+    # Replace NAs with 0
+      filtered_data <- filtered_data %>%
+        mutate(
+          cotimean_34wk = ifelse(is.na(cotimean_34wk), 0, cotimean_34wk)
+        )
+    # calculate smoking_severity_prenatal  
+    filtered_data <- filtered_data %>%
+        mutate(
+          smoking_severity_prenatal = case_when(
+            cotimean_34wk == 0 ~ "Absent",
+            cotimean_34wk > 0 & cotimean_34wk <= 50 ~ "Low",
+            cotimean_34wk > 50 ~ "High"
+          )
+        )
+    ```
+
+```{r}
+# calculate SDP based on smoking_status_prenatal and smoking_severity_prenatal
+  filtered_data <- filtered_data %>%
+    mutate(
+      SDP_status_score = case_when(
+        smoking_status_prenatal == "Non-Smoker" ~ 0,
+        smoking_status_prenatal == "Inconsistent Smoker" ~ 1,
+        smoking_status_prenatal == "Consistent Smoker" ~ 2,
+        TRUE ~ NA_integer_
+      ),
+      SDP_severity_score = case_when(
+        smoking_severity_prenatal == "Absent" ~ 0,
+        smoking_severity_prenatal == "Low" ~ 1,
+        smoking_severity_prenatal == "High" ~ 2,
+        TRUE ~ NA_integer_
+      ),
+      SDP = SDP_status_score + SDP_severity_score
+    )
+# add labels to SDP
+  filtered_data$SDP <- factor(filtered_data$SDP, 
+                              levels = c(0,1,2,3,4),
+                              labels = c("Non-smoker & Absence of smoking",
+                                         "Low smoking or non-smoker with some exposure",
+                                         "Moderate smoking",
+                                         "High smoking",
+                                         "Very high smoking"))
+```
+
+Using these two variables, I then calculated **SDP**. The resulting summary table provides insight into the smoking behavior during pregnancy, considering both the status (Consistent Smoker, Inconsistent Smoker, Non-Smoker) and the severity (Absent, High, Low) of smoking.
+
+```{r}
+# create frequency table
+table_data <- as.data.frame(table(filtered_data$smoking_status_prenatal, filtered_data$smoking_severity_prenatal))
+
+# Rename the columns
+colnames(table_data) <- c("Smoking Status Prenatal", "Smoking Severity Prenatal", "Count")
+
+# Print the table
+print(table_data)
+
+# Create a nicely formatted table
+table_formatted <- table_data %>%
+  kable(caption = "Smoking Status and Severity Prenatal") %>%
+  kable_styling(full_width = FALSE, position = "center") %>%
+  row_spec(0, bold = TRUE)
+
+# Print the formatted table
+table_formatted
+```
+
+Notably, the table highlights that some participants who reported themselves as Non-Smokers during pregnancy still had detectable cotinine in their urine, indicating likely exposure to Environmental Tobacco Smoke (ETS).
+
+### Calculating postnatal exposure severity variable/Environmental Tobacco Smoke (ETS)
+
+To calculate postnatal exposure severity (ETS), I utilized the following variables:
+
+-   **`mom_smoke_pp1`**, **`mom_smoke_pp2`**, **`mom_smoke_pp12wk`**, **`mom_smoke_pp6mo`**.
+
+-   **`cotimean_pp6mo`**.
+
+Before proceeding with the calculation, I first addressed missing values in these variables. I observed that **`mom_smoke_pp1`** and **`mom_smoke_pp2`** had 33 and 15 missing values, respectively. Upon further examination, I discovered that no participants had values in both of these variables; it was either one or the other. Only a few participants had missing values in both variables. Consequently, I decided to merge these variables into a single variable, which I named **`merged_mom_smoke_pp`**. To handle the missing values in this merged variable, I replaced them with the most frequent response, which is 2 (No). I applied a similar approach to replace missing values with 0 in the variables **`cotimean_pp6mo`** and **`cotimean_pp6mo_baby`**.
+
+```{r}
+# calculate Environmental Tobacco Smoke (ETS)
+
+# calculate smoking_status_postnatal
+# check NAs
+na_counts <- sapply(filtered_data[, c("mom_smoke_pp1", "mom_smoke_pp2", "mom_smoke_pp12wk", "mom_smoke_pp6mo")], function(x) sum(is.na(x)))
+
+# merge mom_smoke_pp1 and mom_smoke_pp2 
+filtered_data <- filtered_data %>%
+  mutate(
+    merged_mom_smoke_pp = case_when(
+      !is.na(mom_smoke_pp1) ~ mom_smoke_pp1,
+      !is.na(mom_smoke_pp2) ~ mom_smoke_pp2,
+      TRUE ~ NA_real_
+    )
+  )
+
+# replace NAs wth 2
+filtered_data <- filtered_data %>%
+  mutate(
+    merged_mom_smoke_pp = ifelse(is.na(merged_mom_smoke_pp), 2, merged_mom_smoke_pp),
+    mom_smoke_pp12wk = ifelse(is.na(mom_smoke_pp12wk), 2, mom_smoke_pp12wk),
+    mom_smoke_pp6mo = ifelse(is.na(mom_smoke_pp6mo), 2, mom_smoke_pp6mo)
+  )
+
+na_counts <- sapply(filtered_data[, c("merged_mom_smoke_pp", "mom_smoke_pp12wk", "mom_smoke_pp6mo")], function(x) sum(is.na(x)))
+```
+
+With missing values addressed, I proceeded to create two new variables:
+
+1.  **`smoking_status_postnatal`** - This variable is based on the merged **`merged_mom_smoke_pp`**, **`mom_smoke_pp12wk`**, and **`mom_smoke_pp6mo`** variables.
+
+2.  **`smoking_severity_postnatal`** - This variable is based on **`cotimean_pp6mo`** and **`cotimean_pp6mo_baby`**.
+
+```{r}
+# calculate smoking_status_postnatal based on merged_mom_smoke_pp, mom_smoke_pp12wk, mmom_smoke_pp6mo
+filtered_data <- filtered_data %>%
+  mutate(
+    smoking_status_postnatal = case_when(
+      merged_mom_smoke_pp == 1 & mom_smoke_pp12wk == 1 & mom_smoke_pp6mo == 1 ~ "Consistent Smoker",
+      merged_mom_smoke_pp == 2 & mom_smoke_pp12wk == 2 & mom_smoke_pp6mo == 2 ~ "Non-smoker",
+      (merged_mom_smoke_pp == 1 | mom_smoke_pp12wk == 1 | mom_smoke_pp6mo == 1) ~ "Inconsistent Smoker"
+    )
+  )
+
+# calculate smoking_severity_postnatal based on cotimean_pp6mo and cotimean_pp6mo_baby
+# check NAs
+na_counts <- sapply(filtered_data[, c("cotimean_pp6mo", "cotimean_pp6mo_baby")], function(x) sum(is.na(x)))
+
+# Replace NAs with 0
+filtered_data <- filtered_data %>%
+  mutate(
+    cotimean_pp6mo = ifelse(is.na(cotimean_pp6mo), 0, cotimean_pp6mo),
+    cotimean_pp6mo_baby = ifelse(is.na(cotimean_pp6mo_baby), 0, cotimean_pp6mo_baby)
+  )
+
+# label cotimean_pp6mo and cotimean_pp6mo_baby
+filtered_data <- filtered_data %>%
+  mutate(
+    cotimean_pp6mo_label = case_when(
+      cotimean_pp6mo == 0 ~ "Absent",
+      cotimean_pp6mo > 0 & cotimean_pp6mo <= 50 ~ "Low",
+      cotimean_pp6mo > 50 ~ "High"
+    ),
+    cotimean_pp6mo_baby_label = case_when(
+      cotimean_pp6mo_baby == 0 ~ "Absent",
+      cotimean_pp6mo_baby > 0 & cotimean_pp6mo_baby <= 50 ~ "Low",
+      cotimean_pp6mo_baby > 50 ~ "High"
+    )
+  )
+
+# calculate smoking_severity_postnatal based on cotimean_pp6mo and cotimean_pp6mo_baby
+filtered_data <- filtered_data %>%
+       mutate(
+            max_cotimean = pmax(cotimean_pp6mo, cotimean_pp6mo_baby, na.rm = TRUE),
+              smoking_severity_postnatal = case_when(
+                  max_cotimean == 0 ~ "Absent",
+                  max_cotimean > 0 & max_cotimean <= 50 ~ "Low",
+                  max_cotimean > 50 ~ "High"
+                  )
+               )
+```
+
+Finally, I calculated the **ETS** variable using these two new variables. The resulting summary table presents the distribution of participants' postnatal smoking status (Consistent Smoker, Inconsistent Smoker, Non-Smoker) and the severity of smoking exposure (Absent, High, Low).
+
+```{r}
+# calculate ETS based on smoking_status_postnatal and smoking_severity_postnatal
+filtered_data <- filtered_data %>%
+  mutate(
+    ETS_status_score = case_when(
+      smoking_status_postnatal == "Non-smoker" ~ 0,
+      smoking_status_postnatal == "Inconsistent Smoker" ~ 1,
+      smoking_status_postnatal == "Consistent Smoker" ~ 2,
+      TRUE ~ NA_integer_
+    ),
+    
+    ETS_severity_score = case_when(
+      smoking_severity_postnatal == "Absent" ~ 0,
+      smoking_severity_postnatal == "Low" ~ 1,
+      smoking_severity_postnatal == "High" ~ 2,
+      TRUE ~ NA_integer_
+    ),
+    
+    ETS = ETS_status_score + ETS_severity_score
+    )
+# add labels to ETS
+filtered_data$ETS <- factor(filtered_data$ETS, 
+                            levels = c(0,1,2,3,4),
+                            labels = c("Non-smoker & Absence of exposure",
+                                       "Low exposure (inconsistent/low severity)",
+                                       "Moderate exposure",
+                                       "High exposure (consistent/low or inconsistent/high)",
+                                       "Very high exposure (consistent & high)"))
+```
+
+
+```{r}
+# create frequency table
+table_data_2 <- as.data.frame(table(filtered_data$smoking_status_postnatal, filtered_data$smoking_severity_postnatal))
+colnames(table_data) <- c("smoking_status_postnatal", "smoking_severity_postnatal", "Count")
+
+# Rename the columns
+colnames(table_data_2) <- c("Smoking Status Postnatal", "Smoking Severity Postnatal", "Count")
+
+# Print the table
+print(table_data)
+
+# Create a nicely formatted table
+table_formatted <- table_data_2 %>%
+  kable(caption = "Smoking Status and Severity Postnatal") %>%
+  kable_styling(full_width = FALSE, position = "center") %>%
+  row_spec(0, bold = TRUE)
+
+# Print the formatted table
+table_formatted
+```
+
+### Calculating variables for adolescent self-regulation, substance use, and externalizing
+
+In our dataset, we have 78 variables, and we need to focus on specific variables to examine the effects of SDP/ETS on adolescent self-regulation, substance use, and externalizing. I have already calculated the independent variables: SDP and ETS. Then, I computed three dependent variables.
+
+-   **Externalizing (bpm_ext_imputed):** This variable represents the sum of responses on the Brief Problem Monitor related to externalizing problems on the self and is based on **bpm_ext.** There are four missing values in **bpm_ext**. To handle them, I performed median imputation due to the right-skewed distribution of the data as showen on the plot below.
+
+    ```{r include = FALSE}
+    # calculate dependent variables
+
+    # check NAs for the bpm_ext
+    sum(is.na(filtered_data$bpm_ext))
+    ```
+
+    ```{r, echo=FALSE, out.width="75%"}
+    # check the distribution of the bpm_ext - histogram
+    ggplot(data = filtered_data, aes(x = bpm_ext)) +
+      geom_histogram(binwidth = 1, fill="gray", color="black", alpha = 0.7) +
+      labs(title = "Distribution of Externalizing ",
+           x = "bpm_ext",
+           y = "Count") +
+      theme_minimal()
+
+    # perform median imputation for the bpm_ext
+    # calculate the median of bpm_ext
+    median_bpm_ext <- median(filtered_data$bpm_ext, na.rm = TRUE)
+
+    # replace NAs in bpm_ext with the median
+    filtered_data$bpm_ext_imputed <- ifelse(is.na(filtered_data$bpm_ext), median_bpm_ext, filtered_data$bpm_ext)
+    ```
+
+    **Self-Regulation (self_r):** This variable is calculated as the average response on the Emotion Regulation Questionnaire related to Cognitive Reappraisal (**erq_cog**) and Expressive Suppression (**erq_exp**). While both variables have some missing data, I retained them because each observation had a value in at least one variable.
+
+    ```{r, echo=FALSE, out.width="75%"}
+    # calculate self_r basen on erq_cog and erq_exp
+
+    # see the distribution of erq_cog and erq_exp
+    # create histogram for erq_cog
+    plot_erq_cog <- ggplot(data = project1_data, aes(x = erq_cog)) +
+      geom_histogram(binwidth = 1, fill="gray", color="black", alpha = 0.7) +
+      labs(title = "Distribution of erq_cog (Cognitive Reappraisal)",
+           x = "erq_cog",
+           y = "Count") +
+      theme_minimal()
+
+    # calculete self_r as the average of erq_cog and erq_exp
+    filtered_data <- filtered_data %>%
+      mutate(self_r = (erq_cog + erq_exp) / 2)
+
+    # compare the distribution of self_r, erq_cog and erq_exp - boxplot
+    # Reshape the data for easy plotting
+    plot_data <- filtered_data %>%
+      select(self_r, erq_cog, erq_exp) %>%
+      gather(variable, value, -c())
+
+    # create the boxplot
+    plot <- ggplot(plot_data, aes(x = variable, y = value, fill = variable)) +
+      geom_boxplot() +
+      labs(title = "Distribution of Self-Regulation, Cognitive Reappraisal, and Expressive Suppression",
+           x = "",
+           y = "Value") +
+      theme_minimal() +
+      scale_fill_manual(values = c("lightblue", "blue", "darkblue"))
+    print(plot)
+    ```
+
+    However, there are still 6 missing values in the **`self_r`** variable. After examining its distribution and noticing a left-skewed pattern, I decided to perform median imputation for these missing values.
+
+    ```{r, echo=FALSE, out.width="75%"}
+    # distribution for self_r
+    ggplot(filtered_data, aes(x = self_r)) +
+      geom_histogram(binwidth = 1, fill="gray", color="black", alpha = 0.7) +
+      labs(title = "Distribution of Self-Regulation ",
+           x = "self_r",
+           y = "Count") +
+      theme_minimal()
+
+    ```
+
+    ```{r}
+    # impute missing values in self_r with the median
+    filtered_data <- filtered_data %>%
+      mutate(self_r = ifelse(is.na(self_r), median(self_r, na.rm = TRUE), self_r))
+
+    ```
+
+-   \# replace NAs with 0
+
+    vars_to_check \<- c("cig_ever", "num_cigs_30", "e_cig_ever", "num_e_cigs_30", "mj_ever", "num_mj_30", "alc_ever", "num_alc_30")
+
+    \# Replace NAs with 0
+
+    filtered_data[vars_to_check] \<- lapply(filtered_data[vars_to_check], function(x) ifelse(is.na(x), 0, x))
+
+    \# Display the first few rows to inspect the changes
+
+    head(filtered_data)
+
+-   **Substance Use (SU):** To calculate this variable, I considered several related variables: **cig_ever**, **num_cigs_30**, **e_cig_ever**, **num_e_cigs_30**, **mj_ever**, **num_mj_30**, **alc_ever**, and **num_alc_30**. To ensure the accuracy of the calculations, I first checked for missing data in these variables. In variables related to the question "Have you ever tried substance," I observed 4 to 5 missing values, which I replaced with the most frequent value (0). In variables related to the frequency of substance use, where there were 37 to 40 missing values, I interpreted them as responses indicating "No" to the question, and I also replaced these NAs with 0.
+
+    ```{r}
+    # calculate Substance Use variable (SU) based on cig_ever, num_cigs_30, e_cig_ever, num_e_cigs_30, mj_ever, num_mj_30, alc_ever, num_alc_30
+
+    # check NAs
+    vars_to_check <- c("cig_ever", "num_cigs_30", "e_cig_ever", "num_e_cigs_30", "mj_ever", "num_mj_30", "alc_ever", "num_alc_30")
+    missing_data_summary <- sapply(filtered_data[vars_to_check], function(x) sum(is.na(x)))
+
+    missing_data_SU <- filtered_data %>%
+      select(all_of(vars_to_check)) %>%
+      summarise(across(everything(), ~sum(is.na(.), na.rm = TRUE)))
+
+    # replace NAs with 0
+    vars_to_check <- c("cig_ever", "num_cigs_30", "e_cig_ever", "num_e_cigs_30", "mj_ever", "num_mj_30", "alc_ever", "num_alc_30")
+
+    # Replace NAs with 0 
+    filtered_data[vars_to_check] <- lapply(filtered_data[vars_to_check], function(x) ifelse(is.na(x), 0, x))
+
+    # see the distribution
+    # convert binary variables to factors
+    filtered_data$cig_ever <- as.factor(filtered_data$cig_ever)
+    filtered_data$e_cig_ever <- as.factor(filtered_data$e_cig_ever)
+    filtered_data$mj_ever <- as.factor(filtered_data$mj_ever)
+    filtered_data$alc_ever <- as.factor(filtered_data$alc_ever)
+
+    # Create a function to add percentage labels to the bar plot
+add_percentage_labels <- function(plot) {
+  plot +
+    geom_text(
+      aes(label = scales::percent(..count.. / sum(..count..))),
+      stat = "count",
+      vjust = -0.5
+    )
+}
+
+# Create bar plots with percentage labels
+plot_cig_ever <- add_percentage_labels(
+  ggplot(data = filtered_data, aes(x = factor(cig_ever))) +
+    geom_bar(fill = "lightblue", alpha = 0.7) +
+    labs(x = "cig_ever", y = "") +
+    theme_minimal()
+)
+
+plot_e_cig_ever <- add_percentage_labels(
+  ggplot(data = filtered_data, aes(x = factor(e_cig_ever))) +
+    geom_bar(fill = "blue", alpha = 0.7) +
+    labs(x = "e_cig_ever", y = "") +
+    theme_minimal()
+)
+
+plot_mj_ever <- add_percentage_labels(
+  ggplot(data = filtered_data, aes(x = factor(mj_ever))) +
+    geom_bar(fill = "darkblue", alpha = 0.7) +
+    labs(x = "mj_ever", y = "") +
+    theme_minimal()
+)
+
+plot_alc_ever <- add_percentage_labels(
+  ggplot(data = filtered_data, aes(x = factor(alc_ever))) +
+    geom_bar(fill = "darkviolet", alpha = 0.7) +
+    labs(x = "alc_ever", y = "") +
+    theme_minimal()
+)
+
+# Arrange the plots in one row using grid.arrange
+library(gridExtra)
+combined_plots <- grid.arrange(
+  plot_cig_ever,
+  plot_e_cig_ever,
+  plot_mj_ever,
+  plot_alc_ever,
+  ncol = 4
+)
+
+# Print the combined plots
+print(combined_plots)
+    
+
+
+    # calculate SU
+    filtered_data <- filtered_data %>%
+      mutate(
+        cig_use = ifelse(cig_ever == 1 | num_cigs_30 > 0, 1, 0),
+        e_cig_use = ifelse(e_cig_ever == 1 | num_e_cigs_30 > 0, 1, 0),
+        mj_use = ifelse(mj_ever == 1 | num_mj_30 > 0, 1, 0),
+        alc_use = ifelse(alc_ever == 1 | num_alc_30 > 0, 1, 0),
+        
+        SU_score = cig_use + e_cig_use + mj_use + alc_use,
+        
+        SU = case_when(
+          SU_score == 0 ~ "Non-user",
+          SU_score >= 1 & SU_score <= 2 ~ "Occasional user",
+          SU_score >= 3 ~ "Frequent user"
+        )
+      )
+    
+
+    ```
+
+Now that we have calculated all the independent variables (**SDP** and **ETS**) and dependent variables (**bpm_ext_imputed**, **self_r**, and **SU**), we can proceed with our further analysis. These variables will serve as the basis for the exploration and investigation into the effects of prenatal and postnatal exposure to smoking (**SDP** and **ETS**) on adolescent self-regulation, substance use, and externalizing behavior. The next steps will involve univariate and bivariate analysis.
+
+### Univariate Analysis
+
+#### Descriptive table for independent and dependent variables
+
+```{r}
+# Select the variables 
+selected_vars <- c("SDP", "ETS", "self_r", "bpm_ext_imputed", "SU")
+
+# define the variable types (continuous or categorical) as a named vector
+var_types <- c(
+  SDP = "categorical",
+  ETS = "categorical",
+  self_r = "continuous",
+  bpm_ext_imputed = "continuous",
+  SU = "categorical"
+)
+
+# create the gtsummary table
+table_summary <- filtered_data %>%
+  select(all_of(selected_vars)) %>%
+  tbl_summary(
+    type = var_types,
+    statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_continuous() ~ "{median} [{min}, {max}]",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = list(all_continuous() ~ c(2, 2), all_categorical() ~ c(0, 1)),
+    missing = "no"
+  )
+
+# display the gtsummary table
+table_summary
+
+
+```
+
+#### SDP
+
+```{r, echo=FALSE, out.width="75%"}
+sdp_freq <- filtered_data %>%
+  group_by(SDP) %>%
+  summarise(Count = n(),
+            Percentage = (Count / nrow(filtered_data)) * 100) %>%
+  arrange(desc(Count))
+
+# SDP bar plot
+ggplot(sdp_freq, aes(x = SDP, y = Count)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +  # For horizontal bars
+  labs(title = "Distribution of SDP",
+       x = "SDP Categories",
+       y = "Count") +
+  theme_minimal()
+```
+
+#### ETS
+
+```{r, echo=FALSE, out.width="75%"}
+# frequency and percentage distribution for ETS
+ets_freq <- filtered_data %>%
+  group_by(ETS) %>%
+  summarise(Count = n(),
+            Percentage = (Count / nrow(filtered_data)) * 100) %>%
+  arrange(desc(Count))
+
+# ETS bar plot
+ggplot(ets_freq, aes(x = ETS, y = Count)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +  # For horizontal bars
+  labs(title = "Distribution of ETS",
+       x = "ETS Categories",
+       y = "Count") +
+  theme_minimal()
+```
+
+#### Self_r
+
+```{r, echo=FALSE, out.width="75%"}
+# descriptive statistics for self_r
+self_r_summary <- filtered_data %>%
+  summarise(
+    Mean = mean(self_r, na.rm = TRUE),
+    Median = median(self_r, na.rm = TRUE),
+    SD = sd(self_r, na.rm = TRUE)
+  )
+
+# histogram for self_r
+ggplot(filtered_data, aes(x = self_r)) +
+  geom_histogram(binwidth = 1, fill="gray", color="black", alpha = 0.7) +
+  labs(title = "Distribution of SR",
+       x = "self_r",
+       y = "Count") +
+  theme_minimal()
+
+```
+
+#### SU
+
+```{r, echo=FALSE, out.width="75%"}
+# Frequency distribution for SU
+su_freq <- filtered_data %>%
+  group_by(SU) %>%
+  summarise(Count = n(),
+            Percentage = (Count / nrow(filtered_data)) * 100)
+
+
+# Bar plot for SU
+ggplot(su_freq, aes(x = SU, y = Count)) +
+  geom_bar(stat = "identity", fill="gray", color="black") +
+  labs(title = "Distribution of SU",
+       x = "SU Categories",
+       y = "Count") +
+  theme_minimal()
+```
+
+#### bpm_ext_imputed
+
+```{r, echo=FALSE, out.width="75%"}
+# histogram for bpm_ext_imputed
+ggplot(filtered_data, aes(x = bpm_ext_imputed)) +
+  geom_histogram(binwidth = 1, fill="gray", color="black", alpha = 0.7) +
+  labs(title = "Distribution of EXT",
+       x = "bpm_ext_imputed",
+       y = "Count") +
+  theme_minimal()
+```
+
+Several important observations can be made from the plots:
+
+**Smoking During Pregnancy (SDP):** The data shows a positive trend, with the majority of parents reporting that they did not smoke during pregnancy. However, it's worth noting that even among those who claimed not to smoke, some exhibited the presence of cotinine in their urine, suggesting exposure to Environmental Tobacco Smoke (ETS). On the other hand, approximately 20% of participants reported high levels of smoking during pregnancy, which is a concerning finding.
+
+**Substance Use (SU):** The data reveals that only a small fraction of adolescents were categorized as occasional substance users, while the majority had never experimented with any substances. This suggests a relatively low prevalence of substance use among the studied population.
+
+**Self-Regulation:** The distribution of self-regulation scores exhibits a slight left-skewness, indicating that a slightly larger number of participants have lower self-regulation scores.
+
+### Bivariate Analysis
+
+I conducted the correlation analysis. Here it is the correlation matrix.
+
+```{r}
+# convert SDP and ETS to ordinal numeric values
+levels_SDP <- c("Non-smoker & Absence of smoking", "Low smoking or non-smoker with some exposure", 
+                "Moderate smoking", "High smoking", "Very high smoking")
+filtered_data$SDP <- as.numeric(factor(filtered_data$SDP, levels = levels_SDP))
+
+levels_ETS <- c("Non-smoker & Absence of exposure", "Low exposure (inconsistent/low severity)", 
+                "Moderate exposure", "High exposure (consistent/low or inconsistent/high)", 
+                "Very high exposure (consistent & high)")
+filtered_data$ETS <- as.numeric(factor(filtered_data$ETS, levels = levels_ETS))
+
+# convert SU to binary numeric values
+filtered_data$SU <- ifelse(filtered_data$SU == "Non-user", 0, 1)
+
+# Compute the correlation matrix after handling missing values
+filtered_data_clean <- filtered_data[complete.cases(filtered_data[selected_vars]), ]
+cor_matrix <- cor(filtered_data_clean[selected_vars], use = "complete.obs")
+
+# Display the correlation matrix
+print(cor_matrix)
+
+```
+
+#### **SDP and ETS**:
+
+The correlation coefficient is approximately 0.698, indicating a strong positive association. This means that higher levels of smoking during pregnancy (SDP) are associated with higher levels of environmental tobacco smoke exposure (ETS) and vice versa.
+
+#### **SDP with dependent variables**:
+
+**SDP vs. self_r**: A coefficient of 0.102 indicates a weak positive association. This suggests that higher levels of SDP are slightly associated with higher levels of self-regulation, but the relationship is weak.
+
+**SDP vs. bpm_ext_imputed (Externalizing)**: A coefficient of 0.248 indicates a weak to moderate positive association. This means that higher levels of SDP are somewhat associated with higher levels of externalizing behaviors.
+
+**SDP vs. SU (Substance Use)**: A coefficient of 0.145 indicates a weak positive association. This suggests that higher levels of SDP are slightly associated with a higher likelihood of substance use.
+
+#### **ETS with dependent variables**:
+
+**ETS vs. self_r**: A coefficient of 0.118 indicates a weak positive association.
+
+**ETS vs. bpm_ext_imputed**: A coefficient of 0.232 indicates a weak to moderate positive association.
+
+**ETS vs. SU**: A coefficient of 0.388 indicates a moderate positive association. This suggests that higher levels of ETS are more strongly associated with a higher likelihood of substance use compared to SDP.
+
+### **Self-regulation (self_r) vs Externalizing (bpm_ext_imputed) vs Substance Use (SU):**
+
+**self_r vs. bpm_ext_imputed**: A coefficient of 0.232 indicates a weak to moderate positive association.
+
+**self_r vs. SU**: A coefficient of 0.133 indicates a weak positive association.
+
+**bpm_ext_imputed vs SU:** A coefficient of 0.316 indicates a weak to moderate positive association.
+
+### Regression
+
+```{r include=FALSE}
+# Regression for self_r with SDP controlling for ETS
+model_self_r_SDP <- lm(self_r ~ SDP + ETS, data = filtered_data)
+summary(model_self_r_SDP)
+
+# Regression for bpm_ext_imputed with SDP controlling for ETS
+model_bpm_ext_SDP <- lm(bpm_ext_imputed ~ SDP + ETS, data = filtered_data)
+summary(model_bpm_ext_SDP)
+
+# Logistic Regression for SU with SDP controlling for ETS (assuming SU is binary)
+model_SU_SDP <- glm(SU ~ SDP + ETS, family = binomial(link = "logit"), data = filtered_data)
+summary(model_SU_SDP)
+
+# Regression for self_r with ETS controlling for SDP
+model_self_r_ETS <- lm(self_r ~ ETS + SDP, data = filtered_data)
+summary(model_self_r_ETS)
+
+# Regression for bpm_ext_imputed with ETS controlling for SDP
+model_bpm_ext_ETS <- lm(bpm_ext_imputed ~ ETS + SDP, data = filtered_data)
+summary(model_bpm_ext_ETS)
+
+# Logistic Regression for SU with ETS controlling for SDP (assuming SU is binary)
+model_SU_ETS <- glm(SU ~ ETS + SDP, family = binomial(link = "logit"), data = filtered_data)
+summary(model_SU_ETS)
+
+```
+
+```{r}
+# Create the summary table
+# Just the SDP models
+stargazer(model_self_r_SDP, model_bpm_ext_SDP, model_SU_SDP, type = "text", title="Regression Results - SDP", align=TRUE)
+
+# Just the ETS models
+stargazer(model_self_r_ETS, model_bpm_ext_ETS, model_SU_ETS, type = "text", title="Regression Results - ETS", align=TRUE)
+
+```
+
+-   **SDP** doesn't seem to have a significant effect on any of the outcome variables when **ETS** is controlled for.
+
+-   **ETS** is significantly associated with substance use (**`SU`**) when **SDP** is controlled for, but not with self-regulation or externalizing behavior.
+
+-   It's worth noting that the F-statistics for both models are not significant, suggesting that the models as a whole might not be a good fit for the data.
+
+### Code
+
+```         
+# load packages
+library(dplyr)
+library(skimr)
+library(tidyverse)
+library(naniar)
+library(visdat)
+library(gtsummary)
+library(ggplot2)
+library(gridExtra)
+library(lmtest)
+
+# read the dataset
+project1_data <- read.csv("project1.csv")
+View(project1_data)
+
+# preview the data
+head(project1_data)
+tail(project1_data)
+glimpse(project1_data)
+str(project1_data)
+
+# view data summary
+summary(project1_data)
+skim(project1_data)
+
+# explore missing data
+anyNA(project1_data)
+n_missing(project1_data)
+prop_miss(project1_data)
+mean(is.na(project1_data))
+project1_data %>% is.na() %>% colSums()
+
+# n & % missing values per variable
+miss_var_summary(project1_data)
+miss_var_table(project1_data)
+
+# n & % missing values per observation 
+miss_case_summary(project1_data)
+miss_case_table(project1_data)
+
+# filter out cases with NA in the dependenr variables
+exclude_rows <- c(16, 43, 45, 5, 38, 46, 12, 22)
+keep_rows <- setdiff(1:nrow(project1_data), exclude_rows)
+
+filtered_data <- project1_data[keep_rows, ]
+
+head(filtered_data)
+
+# descriptive statistics for socio-demographical data parent variables
+# variables lists
+parent_vars <- c("page", "psex", "plang", "pethnic", "paian", "pasian", "pnhpi", "pblack", "pwhite", 
+                 "prace_other", "employ", "pedu", "income")
+child_vars <- c("tage", "tsex", "language", "tethnic", "taian", "tasian", "tnhpi", "tblack", "twhite", "trace_other")
+
+# type specification for variables
+type_spec <- setNames(rep("categorical", length(parent_vars) + length(child_vars)), c(parent_vars, child_vars))
+type_spec[c("page", "tage", "income")] <- "continuous"
+
+
+# generating descriptive table for parent variables
+table_parents <- filtered_data %>%
+  select(all_of(parent_vars)) %>%
+  tbl_summary(
+    type = type_spec,
+    statistic = list(all_continuous() ~ "{mean} ({sd}) [{min}, {max}]",
+                     all_categorical() ~ "{n} ({p}%)"),
+    digits = all_continuous() ~ c(2, 2, 2, 2),
+    missing = "no"
+  )
+
+# Generating descriptive table for child variables
+table_children <- filtered_data %>%
+  select(all_of(child_vars)) %>%
+  tbl_summary(
+    type = type_spec,
+    statistic = list(all_continuous() ~ "{mean} ({sd}) [{min}, {max}]",
+                     all_categorical() ~ "{n} ({p}%)"),
+    digits = all_continuous() ~ c(2, 2, 2, 2),
+    missing = "no"
+  )
+
+# Convert tables to gt format
+gt_table_parents <- table_parents %>% as_gt()
+gt_table_children <- table_children %>% as_gt()
+
+# display tables
+gt_table_parents
+gt_table_children
+
+# Save the tables to Word
+gt::gtsave(gt_table_parents, filename = "parent_descriptive_table.docx")
+gt::gtsave(gt_table_children, filename = "child_descriptive_table.docx")
+
+
+# view the answers distribution for mom_smoke variables
+# Prepare data: convert columns to character, replace NAs, and gather data into long format
+  long_data <- filtered_data %>%
+    mutate_at(vars(mom_smoke_16wk, mom_smoke_22wk, mom_smoke_32wk, mom_smoke_pp12wk, mom_smoke_pp6mo), 
+              ~replace(., . == 1, "Yes")) %>%
+    mutate_at(vars(mom_smoke_16wk, mom_smoke_22wk, mom_smoke_32wk, mom_smoke_pp12wk, mom_smoke_pp6mo), 
+              ~replace(., . == 2, "No")) %>%
+    replace_na(list(mom_smoke_16wk = "Missing", mom_smoke_22wk = "Missing", mom_smoke_32wk = "Missing", 
+                    mom_smoke_pp12wk = "Missing", mom_smoke_pp6mo = "Missing")) %>%
+    gather(variable, value, mom_smoke_16wk, mom_smoke_22wk, mom_smoke_32wk, mom_smoke_pp12wk, mom_smoke_pp6mo)
+  
+# create the plots
+  plots <- lapply(unique(long_data$variable), function(var_name) {
+    ggplot(subset(long_data, variable == var_name), aes(x=value)) +
+      geom_bar(fill="blue", color="black", alpha=0.7) +
+      labs(title=paste("Distribution"), x=var_name, y="Count") +
+      theme_minimal()
+  })
+  
+# arrange and display the plots
+  do.call(grid.arrange, c(plots, ncol=5))
+  
+# calculate smoking during pregnancy (SDP)
+  
+# check NAs
+  na_counts <- sapply(filtered_data[, c("mom_smoke_16wk", "mom_smoke_22wk", "mom_smoke_32wk")], function(x) sum(is.na(x)))
+  na_counts
+  
+  filtered_data %>%
+    select(mom_smoke_pp1, mom_smoke_pp2)
+  
+# replace NAs with 2 ("No") in mom_smoke_16wk, mom_smoke_22wk, mom_smoke_32wk
+  filtered_data <- filtered_data %>%
+    mutate(
+      mom_smoke_16wk = ifelse(is.na(mom_smoke_16wk), 2, mom_smoke_16wk),
+      mom_smoke_22wk = ifelse(is.na(mom_smoke_22wk), 2, mom_smoke_22wk),
+      mom_smoke_32wk = ifelse(is.na(mom_smoke_32wk), 2, mom_smoke_32wk)
+    )
+  na_counts <- sapply(filtered_data[, c("mom_smoke_16wk", "mom_smoke_22wk", "mom_smoke_32wk")], function(x) sum(is.na(x)))
+  na_counts
+  
+# calculate smoking_status_prenatal based on mom_smoke_16wk, mom_smoke_22wk, mom_smoke_32wk
+  filtered_data <- filtered_data %>%
+    mutate(
+      smoking_status_prenatal = case_when(
+        mom_smoke_16wk == 1 & mom_smoke_22wk == 1 & mom_smoke_32wk == 1 ~ "Consistent Smoker",
+        mom_smoke_16wk == 2 & mom_smoke_22wk == 2 & mom_smoke_32wk == 2 ~ "Non-Smoker",
+        (mom_smoke_16wk == 1 | mom_smoke_22wk == 1 | mom_smoke_32wk == 1) ~ "Inconsistent Smoker"
+      )
+    )
+
+# calculate smoking_severity_prenatal based on cotimean_34wk
+  
+# check NAs
+  na_counts <- sapply(filtered_data[, c("cotimean_34wk")], function(x) sum(is.na(x)))
+  na_counts
+  
+# Replace NAs with 0
+  filtered_data <- filtered_data %>%
+    mutate(
+      cotimean_34wk = ifelse(is.na(cotimean_34wk), 0, cotimean_34wk)
+    )
+# calculate smoking_severity_prenatal  
+filtered_data <- filtered_data %>%
+    mutate(
+      smoking_severity_prenatal = case_when(
+        cotimean_34wk == 0 ~ "Absent",
+        cotimean_34wk > 0 & cotimean_34wk <= 50 ~ "Low",
+        cotimean_34wk > 50 ~ "High"
+      )
+    )
+
+# Display the labeled data
+table_data <- filtered_data %>%
+  select(smoking_severity_prenatal, cotimean_34wk)
+print(table_data)
+
+# calculate SDP based on smoking_status_prenatal and smoking_severity_prenatal
+  filtered_data <- filtered_data %>%
+    mutate(
+      SDP_status_score = case_when(
+        smoking_status_prenatal == "Non-Smoker" ~ 0,
+        smoking_status_prenatal == "Inconsistent Smoker" ~ 1,
+        smoking_status_prenatal == "Consistent Smoker" ~ 2,
+        TRUE ~ NA_integer_
+      ),
+      SDP_severity_score = case_when(
+        smoking_severity_prenatal == "Absent" ~ 0,
+        smoking_severity_prenatal == "Low" ~ 1,
+        smoking_severity_prenatal == "High" ~ 2,
+        TRUE ~ NA_integer_
+      ),
+      SDP = SDP_status_score + SDP_severity_score
+    )
+# add labels to SDP
+  filtered_data$SDP <- factor(filtered_data$SDP, 
+                              levels = c(0,1,2,3,4),
+                              labels = c("Non-smoker & Absence of substance use",
+                                         "Low substance use or non-smoker with some exposure",
+                                         "Moderate substance use",
+                                         "High substance use",
+                                         "Very high substance use"))
+  
+# view SDP value
+filtered_data$SDP
+
+# create frequency table
+table_data <- as.data.frame(table(filtered_data$smoking_status_prenatal, filtered_data$smoking_severity_prenatal))
+colnames(table_data) <- c("smoking_status_prenatal", "smoking_severity_prenatal", "Count")
+table_data
+
+
+# calculate Environmental Tobacco Smoke (ETS)
+
+# calculate smoking_status_postnatal
+# check NAs
+na_counts <- sapply(filtered_data[, c("mom_smoke_pp1", "mom_smoke_pp2", "mom_smoke_pp12wk", "mom_smoke_pp6mo")], function(x) sum(is.na(x)))
+na_counts
+
+filtered_data %>%
+  select(mom_smoke_pp1, mom_smoke_pp2)
+
+# merge mom_smoke_pp1 and mom_smoke_pp2 
+filtered_data <- filtered_data %>%
+  mutate(
+    merged_mom_smoke_pp = case_when(
+      !is.na(mom_smoke_pp1) ~ mom_smoke_pp1,
+      !is.na(mom_smoke_pp2) ~ mom_smoke_pp2,
+      TRUE ~ NA_real_
+    )
+  )
+
+# replace NAs wth 2
+filtered_data <- filtered_data %>%
+  mutate(
+    merged_mom_smoke_pp = ifelse(is.na(merged_mom_smoke_pp), 2, merged_mom_smoke_pp),
+    mom_smoke_pp12wk = ifelse(is.na(mom_smoke_pp12wk), 2, mom_smoke_pp12wk),
+    mom_smoke_pp6mo = ifelse(is.na(mom_smoke_pp6mo), 2, mom_smoke_pp6mo)
+  )
+
+na_counts <- sapply(filtered_data[, c("merged_mom_smoke_pp", "mom_smoke_pp12wk", "mom_smoke_pp6mo")], function(x) sum(is.na(x)))
+na_counts
+
+# calculate smoking_status_postnatal based on merged_mom_smoke_pp, mom_smoke_pp12wk, mmom_smoke_pp6mo
+filtered_data <- filtered_data %>%
+  mutate(
+    smoking_status_postnatal = case_when(
+      merged_mom_smoke_pp == 1 & mom_smoke_pp12wk == 1 & mom_smoke_pp6mo == 1 ~ "Consistent Smoker",
+      merged_mom_smoke_pp == 2 & mom_smoke_pp12wk == 2 & mom_smoke_pp6mo == 2 ~ "Non-smoker",
+      (merged_mom_smoke_pp == 1 | mom_smoke_pp12wk == 1 | mom_smoke_pp6mo == 1) ~ "Inconsistent Smoker"
+    )
+  )
+
+# calculate smoking_severity_postnatal based on cotimean_pp6mo and cotimean_pp6mo_baby
+# check NAs
+na_counts <- sapply(filtered_data[, c("cotimean_pp6mo", "cotimean_pp6mo_baby")], function(x) sum(is.na(x)))
+na_counts
+
+# Replace NAs with 0
+filtered_data <- filtered_data %>%
+  mutate(
+    cotimean_pp6mo = ifelse(is.na(cotimean_pp6mo), 0, cotimean_pp6mo),
+    cotimean_pp6mo_baby = ifelse(is.na(cotimean_pp6mo_baby), 0, cotimean_pp6mo_baby)
+  )
+
+table_data <- filtered_data %>%
+  select(smoking_status_postnatal, cotimean_pp6mo, cotimean_pp6mo_baby)
+print(table_data)
+
+# label cotimean_pp6mo and cotimean_pp6mo_baby
+filtered_data <- filtered_data %>%
+  mutate(
+    cotimean_pp6mo_label = case_when(
+      cotimean_pp6mo == 0 ~ "Absent",
+      cotimean_pp6mo > 0 & cotimean_pp6mo <= 50 ~ "Low",
+      cotimean_pp6mo > 50 ~ "High"
+    ),
+    cotimean_pp6mo_baby_label = case_when(
+      cotimean_pp6mo_baby == 0 ~ "Absent",
+      cotimean_pp6mo_baby > 0 & cotimean_pp6mo_baby <= 50 ~ "Low",
+      cotimean_pp6mo_baby > 50 ~ "High"
+    )
+  )
+
+# Display the labeled data
+table_data <- filtered_data %>%
+  select(cotimean_pp6mo_label, cotimean_pp6mo_baby_label)
+print(table_data)
+
+# calculate smoking_severity_postnatal based on cotimean_pp6mo and cotimean_pp6mo_baby
+filtered_data <- filtered_data %>%
+       mutate(
+            max_cotimean = pmax(cotimean_pp6mo, cotimean_pp6mo_baby, na.rm = TRUE),
+              smoking_severity_postnatal = case_when(
+                  max_cotimean == 0 ~ "Absent",
+                  max_cotimean > 0 & max_cotimean <= 50 ~ "Low",
+                  max_cotimean > 50 ~ "High"
+                  )
+               )
+
+# calculate ETS based on smoking_status_postnatal and smoking_severity_postnatal
+filtered_data <- filtered_data %>%
+  mutate(
+    ETS_status_score = case_when(
+      smoking_status_postnatal == "Non-smoker" ~ 0,
+      smoking_status_postnatal == "Inconsistent Smoker" ~ 1,
+      smoking_status_postnatal == "Consistent Smoker" ~ 2,
+      TRUE ~ NA_integer_
+    ),
+    
+    ETS_severity_score = case_when(
+      smoking_severity_postnatal == "Absent" ~ 0,
+      smoking_severity_postnatal == "Low" ~ 1,
+      smoking_severity_postnatal == "High" ~ 2,
+      TRUE ~ NA_integer_
+    ),
+    
+    ETS = ETS_status_score + ETS_severity_score
+    )
+# add labels to ETS
+filtered_data$ETS <- factor(filtered_data$ETS, 
+                            levels = c(0,1,2,3,4),
+                            labels = c("Non-smoker & Absence of exposure",
+                                       "Low exposure (inconsistent/low severity)",
+                                       "Moderate exposure",
+                                       "High exposure (consistent/low or inconsistent/high)",
+                                       "Very high exposure (consistent & high)"))
+
+# view ETS
+filtered_data$ETS
+
+# create frequency table
+table_data <- as.data.frame(table(filtered_data$smoking_status_postnatal, filtered_data$smoking_severity_postnatal))
+colnames(table_data) <- c("smoking_status_postnatal", "smoking_severity_postnatal", "Count")
+table_data
+
+
+# calculate dependent variables
+
+# check NAs for the bpm_ext
+n_missing(filtered_data$bpm_ext)
+filtered_data$bpm_ext
+
+# check the distribution of the bpm_ext - histogram
+ggplot(data = filtered_data, aes(x = bpm_ext)) +
+  geom_histogram(binwidth = 1, fill = "blue", alpha = 0.7) +
+  labs(title = "Distribution of bpm_ext",
+       x = "bpm_ext",
+       y = "Count") +
+  theme_minimal()
+
+# check the distribution of the bpm_ext - boxplot
+ggplot(data = filtered_data, aes(y = bpm_ext)) +
+  geom_boxplot(fill = "red", alpha = 0.7) +
+  labs(title = "Boxplot of bpm_ext",
+       y = "bpm_ext") +
+  theme_minimal()
+
+# perform median imputation for the bpm_ext
+# calculate the median of bpm_ext
+median_bpm_ext <- median(filtered_data$bpm_ext, na.rm = TRUE)
+
+# replace NAs in bpm_ext with the median
+filtered_data$bpm_ext_imputed <- ifelse(is.na(filtered_data$bpm_ext), median_bpm_ext, filtered_data$bpm_ext)
+
+head(filtered_data[, c("bpm_ext", "bpm_ext_imputed")])
+
+
+# calculate self_r basen on erq_cog and erq_exp
+
+# see the distribution of erq_cog and erq_exp
+# create histogram for erq_cog
+plot_erq_cog <- ggplot(data = project1_data, aes(x = erq_cog)) +
+  geom_histogram(binwidth = 1, fill = "blue", alpha = 0.7) +
+  labs(title = "Distribution of erq_cog (Cognitive Reappraisal)",
+       x = "erq_cog",
+       y = "Count") +
+  theme_minimal()
+
+# create histogram for erq_exp
+plot_erq_exp <- ggplot(data = project1_data, aes(x = erq_exp)) +
+  geom_histogram(binwidth = 1, fill = "red", alpha = 0.7) +
+  labs(title = "Distribution of erq_exp (Expressive Suppression)",
+       x = "erq_exp",
+       y = "Count") +
+  theme_minimal()
+
+# see the two plots side by side
+grid.arrange(plot_erq_cog, plot_erq_exp, ncol=2)
+
+# calculete self_r as the average of erq_cog and erq_exp
+filtered_data <- filtered_data %>%
+  mutate(self_r = (erq_cog + erq_exp) / 2)
+  filtered_data$self_r
+
+# see the distribution of self_r - histogram
+plot_self_r <- ggplot(data = filtered_data, aes(x = self_r)) +
+    geom_histogram(binwidth = 1, fill = "green", alpha = 0.7) +
+    labs(title = "Distribution of self_r (Self Regulation)",
+         x = "self_r",
+         y = "Count") +
+    theme_minimal()
+  
+# compare the distribution of self_r, erq_cog and erq_exp - histogram
+grid.arrange(plot_self_r, plot_erq_cog, plot_erq_exp, ncol=3)
+
+# compare the distribution of self_r, erq_cog and erq_exp - boxplot
+# Reshape the data for easy plotting
+plot_data <- filtered_data %>%
+  select(self_r, erq_cog, erq_exp) %>%
+  gather(variable, value, -c())
+
+# create the boxplot
+plot <- ggplot(plot_data, aes(x = variable, y = value, fill = variable)) +
+  geom_boxplot() +
+  labs(title = "Distribution of self_r, erq_cog, and erq_exp",
+       x = "",
+       y = "Value") +
+  theme_minimal() +
+  scale_fill_manual(values = c("blue", "red", "green"))
+
+# distribution for self_r 
+ggplot(filtered_data, aes(x = self_r)) +
+  geom_histogram(binwidth = 1, fill = "blue", alpha = 0.7) +
+  labs(title = "Distribution of self_r",
+       x = "self_r",
+       y = "Count") +
+  theme_minimal()
+
+# impute missing values in self_r with the median
+filtered_data <- filtered_data %>%
+  mutate(self_r = ifelse(is.na(self_r), median(self_r, na.rm = TRUE), self_r))
+
+
+# calculate Substance Use variable (SU) based on cig_ever, num_cigs_30, e_cig_ever, num_e_cigs_30, mj_ever, num_mj_30, alc_ever, num_alc_30
+
+# check NAs
+vars_to_check <- c("cig_ever", "num_cigs_30", "e_cig_ever", "num_e_cigs_30", "mj_ever", "num_mj_30", "alc_ever", "num_alc_30")
+missing_data_summary <- sapply(filtered_data[vars_to_check], function(x) sum(is.na(x)))
+
+missing_data_SU <- filtered_data %>%
+  select(all_of(vars_to_check)) %>%
+  summarise(across(everything(), ~sum(is.na(.), na.rm = TRUE)))
+
+# replace NAs with 0
+vars_to_check <- c("cig_ever", "num_cigs_30", "e_cig_ever", "num_e_cigs_30", "mj_ever", "num_mj_30", "alc_ever", "num_alc_30")
+
+# Replace NAs with 0 
+filtered_data[vars_to_check] <- lapply(filtered_data[vars_to_check], function(x) ifelse(is.na(x), 0, x))
+
+# see the distribution
+# convert binary variables to factors
+filtered_data$cig_ever <- as.factor(filtered_data$cig_ever)
+filtered_data$e_cig_ever <- as.factor(filtered_data$e_cig_ever)
+filtered_data$mj_ever <- as.factor(filtered_data$mj_ever)
+filtered_data$alc_ever <- as.factor(filtered_data$alc_ever)
+
+# Create bar plots for each "have you ever tried" variable
+
+# bar plot for cig_ever
+plot_cig_ever <- ggplot(data = filtered_data, aes(x = factor(cig_ever))) +
+  geom_bar(fill = "blue", alpha = 0.7) +
+  labs(x = "cig_ever", y = "") +
+  theme_minimal()
+
+# bar plot for e_cig_ever
+plot_e_cig_ever <- ggplot(data = filtered_data, aes(x = factor(e_cig_ever))) +
+  geom_bar(fill = "red", alpha = 0.7) +
+  labs(x = "e_cig_ever", y = "") +
+  theme_minimal()
+
+# bar plot for mj_ever
+plot_mj_ever <- ggplot(data = filtered_data, aes(x = factor(mj_ever))) +
+  geom_bar(fill = "green", alpha = 0.7) +
+  labs(x = "mj_ever", y = "") +
+  theme_minimal()
+
+# bar plot for alc_ever
+plot_alc_ever <- ggplot(data = filtered_data, aes(x = factor(alc_ever))) +
+  geom_bar(fill = "purple", alpha = 0.7) +
+  labs(x = "alc_ever", y = "") +
+  theme_minimal()
+
+# see all the plots in one row
+grid.arrange(plot_cig_ever, plot_e_cig_ever, plot_mj_ever, plot_alc_ever, ncol=4)
+
+# calculate SU
+filtered_data <- filtered_data %>%
+  mutate(
+    cig_use = ifelse(cig_ever == 1 | num_cigs_30 > 0, 1, 0),
+    e_cig_use = ifelse(e_cig_ever == 1 | num_e_cigs_30 > 0, 1, 0),
+    mj_use = ifelse(mj_ever == 1 | num_mj_30 > 0, 1, 0),
+    alc_use = ifelse(alc_ever == 1 | num_alc_30 > 0, 1, 0),
+    
+    SU_score = cig_use + e_cig_use + mj_use + alc_use,
+    
+    SU = case_when(
+      SU_score == 0 ~ "Non-user",
+      SU_score >= 1 & SU_score <= 2 ~ "Occasional user",
+      SU_score >= 3 ~ "Frequent user"
+    )
+  )
+
+
+# univariate analysis
+
+# descriptive statistics
+# Select the variables 
+selected_vars <- c("SDP", "ETS", "self_r", "bpm_ext_imputed", "SU")
+
+# define the variable types (continuous or categorical) as a named vector
+var_types <- c(
+  SDP = "categorical",
+  ETS = "categorical",
+  self_r = "continuous",
+  bpm_ext_imputed = "continuous",
+  SU = "categorical"
+)
+
+# create the gtsummary table
+table_summary <- filtered_data %>%
+  select(all_of(selected_vars)) %>%
+  tbl_summary(
+    type = var_types,
+    statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_continuous() ~ "{median} [{min}, {max}]",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = list(all_continuous() ~ c(2, 2), all_categorical() ~ c(0, 1)),
+    missing = "no"
+  )
+
+# display the gtsummary table
+table_summary
+
+
+# descriptive statistics for SDP
+# frequency and percentage distribution for SDP
+sdp_freq <- filtered_data %>%
+  group_by(SDP) %>%
+  summarise(Count = n(),
+            Percentage = (Count / nrow(filtered_data)) * 100) %>%
+  arrange(desc(Count))
+
+print(sdp_freq)
+
+# SDP bar plot
+ggplot(sdp_freq, aes(x = SDP, y = Count)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +  # For horizontal bars
+  labs(title = "Distribution of SDP",
+       x = "SDP Categories",
+       y = "Count") +
+  theme_minimal()
+
+
+# descriptive statistics for ETS
+# frequency and percentage distribution for ETS
+ets_freq <- filtered_data %>%
+  group_by(ETS) %>%
+  summarise(Count = n(),
+            Percentage = (Count / nrow(filtered_data)) * 100) %>%
+  arrange(desc(Count))
+
+print(ets_freq)
+
+# ETS bar plot
+ggplot(ets_freq, aes(x = ETS, y = Count)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +  # For horizontal bars
+  labs(title = "Distribution of ETS",
+       x = "ETS Categories",
+       y = "Count") +
+  theme_minimal()
+
+
+# descriptive statistics for self_r
+self_r_summary <- filtered_data %>%
+  summarise(
+    Mean = mean(self_r, na.rm = TRUE),
+    Median = median(self_r, na.rm = TRUE),
+    SD = sd(self_r, na.rm = TRUE)
+  )
+
+print(self_r_summary)
+
+# histogram for self_r
+ggplot(filtered_data, aes(x = self_r)) +
+  geom_histogram(binwidth = 1, fill = "red", alpha = 0.7) +
+  labs(title = "Distribution of self_r",
+       x = "self_r",
+       y = "Count") +
+  theme_minimal()
+
+# descriptive statistics for SU
+# Frequency distribution for SU
+su_freq <- filtered_data %>%
+  group_by(SU) %>%
+  summarise(Count = n(),
+            Percentage = (Count / nrow(filtered_data)) * 100)
+
+print(su_freq)
+
+# Bar plot for SU
+ggplot(su_freq, aes(x = SU, y = Count)) +
+  geom_bar(stat = "identity", fill = "green") +
+  labs(title = "Distribution of SU",
+       x = "SU Categories",
+       y = "Count") +
+  theme_minimal()
+
+# descriptive statistics for bpm_ext_imputed
+# frequency and percentage distribution for bpm_ext_imputed
+bpm_ext_freq <- filtered_data %>%
+  group_by(bpm_ext_imputed) %>%
+  summarise(Count = n(),
+            Percentage = (Count / nrow(filtered_data)) * 100) %>%
+  arrange(desc(Count))
+
+print(bpm_ext_freq)
+
+# Bar plot for bpm_ext_imputed
+ggplot(bpm_ext_freq, aes(x = bpm_ext_imputed, y = Count)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  coord_flip() +  # For horizontal bars
+  labs(title = "Distribution of bpm_ext_imputed",
+       x = "bpm_ext_imputed Categories",
+       y = "Count") +
+  theme_minimal()
+
+# descriptive statistics for bpm_ext_imputed
+bpm_ext_summary <- filtered_data %>%
+  summarise(
+    Mean = mean(bpm_ext_imputed, na.rm = TRUE),
+    Median = median(bpm_ext_imputed, na.rm = TRUE),
+    SD = sd(bpm_ext_imputed, na.rm = TRUE)
+  )
+
+print(bpm_ext_summary)
+
+# histogram for bpm_ext_imputed
+ggplot(filtered_data, aes(x = bpm_ext_imputed)) +
+  geom_histogram(binwidth = 1, fill = "red", alpha = 0.7) +
+  labs(title = "Distribution of bpm_ext_imputed",
+       x = "bpm_ext_imputed",
+       y = "Count") +
+  theme_minimal()
+
+#Bivariate Analysis
+
+# convert SDP and ETS to ordinal numeric values
+levels_SDP <- c("Non-smoker & Absence of smoking", "Low smoking or non-smoker with some exposure", 
+                "Moderate smoking", "High smoking", "Very high smoking")
+filtered_data$SDP <- as.numeric(factor(filtered_data$SDP, levels = levels_SDP))
+
+levels_ETS <- c("Non-smoker & Absence of exposure", "Low exposure (inconsistent/low severity)", 
+                "Moderate exposure", "High exposure (consistent/low or inconsistent/high)", 
+                "Very high exposure (consistent & high)")
+filtered_data$ETS <- as.numeric(factor(filtered_data$ETS, levels = levels_ETS))
+
+# convert SU to binary numeric values
+filtered_data$SU <- ifelse(filtered_data$SU == "Non-user", 0, 1)
+
+# Compute the correlation matrix after handling missing values
+filtered_data_clean <- filtered_data[complete.cases(filtered_data[selected_vars]), ]
+cor_matrix <- cor(filtered_data_clean[selected_vars], use = "complete.obs")
+
+# Display the correlation matrix
+print(cor_matrix)
+
+# regression
+# Regression for self_r with SDP controlling for ETS
+model_self_r_SDP <- lm(self_r ~ SDP + ETS, data = filtered_data)
+summary(model_self_r_SDP)
+
+# Regression for bpm_ext_imputed with SDP controlling for ETS
+model_bpm_ext_SDP <- lm(bpm_ext_imputed ~ SDP + ETS, data = filtered_data)
+summary(model_bpm_ext_SDP)
+
+# Logistic Regression for SU with SDP controlling for ETS (assuming SU is binary)
+model_SU_SDP <- glm(SU ~ SDP + ETS, family = binomial(link = "logit"), data = filtered_data)
+summary(model_SU_SDP)
+
+# Regression for self_r with ETS controlling for SDP
+model_self_r_ETS <- lm(self_r ~ ETS + SDP, data = filtered_data)
+summary(model_self_r_ETS)
+
+# Regression for bpm_ext_imputed with ETS controlling for SDP
+model_bpm_ext_ETS <- lm(bpm_ext_imputed ~ ETS + SDP, data = filtered_data)
+summary(model_bpm_ext_ETS)
+
+# Logistic Regression for SU with ETS controlling for SDP (assuming SU is binary)
+model_SU_ETS <- glm(SU ~ ETS + SDP, family = binomial(link = "logit"), data = filtered_data)
+summary(model_SU_ETS)
+```
