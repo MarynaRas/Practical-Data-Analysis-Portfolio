@@ -26,8 +26,8 @@ Here is an overview of the repository structure:
 
 - `Images/`: This directory contains images and visualizations used in the project.
 - `LICENSE`: The license file outlines the terms and conditions for using this project.
-- `Exploratory_Data_Analysis.Rmd`: The R Markdown file with detailed code and explanations of the exploratory data analysis.
-- `Exploratory_Data_Analysis.pdf`: A PDF document summarizing the analysis, findings, and visualizations.
+- `Project1_Exploratory_Data_Analysis.Rmd`: The R Markdown file with detailed code and explanations of the exploratory data analysis.
+- `Project1_Exploratory_Data_Analysis.pdf`: A PDF document summarizing the analysis, findings, and visualizations.
 - `README.md`: You are currently reading this file, which provides a summary of the project, data sources, methods, and repository structure.
 
 ## Discussion
