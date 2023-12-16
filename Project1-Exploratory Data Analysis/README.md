@@ -25,10 +25,6 @@ To aid our analysis, we created several composite variables:
 Here is an overview of the repository structure:
 
 - `Images/`: This directory contains images and visualizations used in the project.
-- `LICENSE`: The license file outlines the terms and conditions for using this project.
 - `Project1_Exploratory_Data_Analysis.Rmd`: The R Markdown file with detailed code and explanations of the exploratory data analysis.
 - `Project1_Exploratory_Data_Analysis.pdf`: A PDF document summarizing the analysis, findings, and visualizations.
 - `README.md`: You are currently reading this file, which provides a summary of the project, data sources, methods, and repository structure.
-
-## Discussion
-Our exploratory data analysis serves as a foundation for understanding the complex connections between maternal tobacco exposure and various child outcomes. While preliminary findings suggest potential associations, further investigations and analyses are needed to uncover the underlying mechanisms comprehensively. Future research directions may include longitudinal studies, consideration of genetic factors, and qualitative research, ultimately leading to evidence-based interventions to improve child and adolescent health.
