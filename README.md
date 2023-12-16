@@ -13,7 +13,6 @@ We analyzed a dataset comprising information from approximately 800 pregnant ind
 
 ### Repository Structure
 - `Images/`: Directory containing project images and visualizations.
-- `LICENSE`: The license file outlining the terms and conditions for using this project.
 - `Project1_Exploratory_Data_Analysis.Rmd`: R Markdown file with detailed code and explanations of the exploratory data analysis.
 - `Project1_Exploratory_Data_Analysis.pdf`: PDF document summarizing the analysis, findings, and visualizations.
 - `README.md`: This file, providing a summary of the project, data sources, methods, and repository structure.
